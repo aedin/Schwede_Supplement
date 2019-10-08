@@ -1,0 +1,1921 @@
+---
+title: 'Supplementary Methods: The impact of stroma admixture on molecular subtypes and prognostic gene signatures in serous ovarian cancer '
+author: 'Schwede et al '
+date: '`r Sys.Date()`'
+output:
+ html_document:
+    code_folding: hide
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+
+---
+
+
+```{r setup,echo=FALSE, message=FALSE, results=FALSE, warning=FALSE,comment=FALSE, cache=FALSE}
+## Maybe need to add header-includes: \usepackage{graphicx} in the YAML or bibliography: bibilo.bib
+library(rmarkdown)
+library(knitr)
+#BiocStyle::markdown()
+
+#library(printr)
+#opts_chunk$set(fig.path='fig', cache.path='cache/',fig.width=8, fig.height=8, fig.align='left',par=TRUE,eval=TRUE, echo=FALSE, cache=TRUE, message=FALSE, error = FALSE, fig.show="asis")
+opts_chunk$set(fig.path='fig/', cache.path='cache/',eval=TRUE, echo=FALSE, cache=TRUE, message=FALSE, error = FALSE, dpi = 144)
+options(digits = 4, scipen = 10, stringsAsFactors = FALSE, width=100)
+nchar= base:::nchar
+
+source("./src/param.R")
+```
+
+
+
+
+
+```{r loadLibsData, results='hide', echo=FALSE, message=FALSE}
+pkg = installed.packages()
+if (!"BiocManager"%in%pkg) install.packages("BiocManager")
+
+ReqPkg<-c("made4", "affy", "caret", "limma", "frma", "ROC","pROC", "nortest", "dendextend", "readxl", "sva", "biomaRt", "annotate", "hgu133plus2.db","hgu133plus2frmavecs", "curatedOvarianData")
+
+ReqPkg2<- "CellMix"  # Install no longer working
+
+BiocManager::install(ReqPkg[!ReqPkg%in%pkg])
+
+library(made4)
+library(affy)
+library(caret)
+library(limma)
+library(frma)
+library(ROC)
+library(pROC)
+library(nortest)
+library(dendextend)
+library(readxl)
+library(sva)
+
+# Annotation Packages
+library(biomaRt)
+library(annotate)
+library("hgu133plus2.db")
+library(hgu133plus2frmavecs)
+
+library(curatedOvarianData)
+```
+
+```{r}
+
+proc_esets<-function(){
+  data(package="curatedOvarianData")$results[,"Item"]
+  source(system.file("extdata","patientselection.config",package="curatedOvarianData"))
+  sapply(ls(), function(x) if(!x %in% c("remove.samples", "duplicates")) print(get(x)))
+  source(system.file("extdata", "createEsetList.R", package = "curatedOvarianData"))
+#  esets<-(esets[sapply(esets, function(x) !all(is.na(x$percent_stromal_cells)))])
+ # sapply(esets, function(x) summary(x$percent_tumor_cells))
+  return(esets)
+}
+
+if(file.exists(curatedOvarianDataEsetsfile)) {
+  load(curatedOvarianDataEsetsfile)
+}else{
+  esets<-proc_esets()
+  save(esets, file=curatedOvarianDataEsetsfile )
+}
+
+supplTabs<-lapply(1:9,function(i) read_excel(SuppTab, sheet=i, skip=4))
+```
+
+
+```{r leungPaper, eval=FALSE, echo=FALSE}
+aa<-file.path(inputdir, "GSE40595.Rda")
+if (!file.exists(aa)) {
+  library(GEOquery)
+  GSE40595<-getGEO("GSE40595")
+  GSE40595<-GSE40595[[1]]
+  save(GSE40595, file=aa)
+  }
+load(aa)
+```
+
+
+```{r setupB, results='hide', echo=FALSE, eval=FALSE}
+# load Data
+library(curatedOvarianData)
+#data(package="curatedOvarianData")
+
+data("GSE18520_eset") # GSE18520 is the Mok datasets
+data("GSE9891_eset") # AOCS dataset
+```
+
+```{r Dataset}
+# Birrer Data
+load(file=file.path(datadir,"birrer_eSet_complete.RData"))
+
+#Load AOCS (probeset) data
+load(file.path(datadir,'AOCS_eSet.RData'))
+```
+
+
+
+# Tumor-Stroma Gene Signatures 
+We developed gene signatures of high grade serous ovarian carcinoma and adjacent stroma from paired  microdissected tissue using two datasets. 
+
+* paired tumor (n=4), tumor-stroma (n=4) for C1 molecular subtype AOCS tumors.  
+* paired microdissected tumor (n=38) and tumor-stroma (n=38) from an MGH study
+
+
+
+## Datasets
+The Australian Ovarian Cancer Study (AOCS) data is available in GSE9891 [@Tothill2008]. The microdissected data is avaiable in GSE9890. It contains Affymetrix gene expression profiles of paired stroma and epithelial cells from 5 tumour samples. These 5 tumor samples are in GSE9891.Therefore 3 tissue samples, the bulk (non-microdissected) tissue,  microdissected epithelial tumor and and tumor stroma were availble for each. Four of these had molecular subtype C1, and one was C2. We only used the C1 microdissected tumor, tumor stroma pairs when generating the gene signature.
+
+The MGH tumor, stroma data, contained 38 tumor samples which are available in GEO datasets GSE18520. Matched stroma gene expression from these tumors were supplied by Mike Birrier, MGH. These are available in GSE40595. The MGH dataset also contained 10 normal ovarian stroma samples. These data analysis were obtained on Affymeytrix U133a or U133plus2 arrays. For these analyses, raw cel files were normalized using Frozen RMA (frma). There is a batch effect in these data that can be easily removed. 
+
+Both GSE18520 (Mok) and GSE9891 (AOCS) are available in the Bioconductor package curatedOvarianData.
+
+## Differential gene expression
+
+To analyze genome-wide differential gene expression between paired stroma and tumor in the AOCS microdissected dataset, we used a moderated paired t-test in which the variance was adjusted with the empirical Bayes method using the Bioconductor package limma [@Smyth2004], with a p-value cutoff of 0.01. 
+
+We also used a less stringent cutoff (p < 0.05 after FDR correction using the Benjamini-Hochberg method [@Hochberg1995] ) to identify a broader set of tumor and stromal genes. Genes that were differentially expressed between pairs of AOCS molelcular subtypes were detected using the same method but with an unpaired rather than paired t-test.
+
+
+## The AOCS C1  Tumor-Stroma Signature (Table 1,  688 gene signature)
+
+A 688-gene signature discriminated tumor and stroma paired tissue (n=8) microdissected from tumors of the C1/stromal subtype in the AOCS study (p < 0.01 after paired t-test with modified variance and false discovery rate (FDR) correction). The gene list was saved as Supplementary Table 1. 
+
+This signature contained 461 and 227 unique gene symbols with increased expression in C1 stroma and tumor, which are referred to as the “stromal gene set” and “tumor gene set,” respectively. 
+
+
+```{r heatplot_SchwedeSig_BirrerData2, message=FALSE, warning=FALSE}
+geneSig<-supplTabs[[1]]
+names(geneSig) = sub("symbols", "GeneSymbols", sub("Affy_ID\\'s", "AffyIDs", gsub("_gene", "", gsub(" ", "_", names(geneSig) ))))
+sapply(geneSig[1:2], n_distinct, na.rm=TRUE)
+sapply(geneSig[3:4], n_distinct, na.rm=TRUE)
+geneSig<-as.list(geneSig)
+geneSig<-lapply(geneSig, function(x) x[!is.na(x)])
+```
+
+```{r aocsFil}
+#table(aocs_eSet$Type)
+#table(aocs_eSet$Histological.Subtype)
+#table(aocs_eSet$FIGO.Stage)
+#table(aocs_eSet$Grade)
+#table(aocs_eSet$k.means.Group)
+fil= aocs_eSet$Type=="MAL" & aocs_eSet$Histological.Subtype=="Ser"& aocs_eSet$k.means.Group%in%c(1,2,4,5)& aocs_eSet$FIGO.Stage%in%c("III","IV")
+```
+
+We performed hierarchical clustering analysis of the AOCS tumor-stroma gene signature in the 165 AOCS tumors with high grade serous subtypes. The AOCS tumors were filtered to those with Maligant (MAL), serous (Ser),  FIGO Stage 3/4 histology and had molecular subtype C1,C2,C4 and C5. 
+
+```{r FigS0, fig.cap="FigS0"}
+aTree<-heatplot(aocs_eSet[c(geneSig[[1]],geneSig[[2]]),fil],classvec = factor(aocs_eSet$k.means.Group[fil]), classvec2=factor(rep(c("Stroma", "Tumor"), times=sapply(geneSig, length)[1:2])),labRow="", returnSampleTree = TRUE, classvecCol =c("gray80", "grey20", "navy", "cyan"),  classvec2Col =c( "green", "yellow"))
+
+legend("topright", legend=c(paste0("C",c(1,2,4,5)), "Stroma", "Tumor"), fill=c("gray80", "grey20", "navy", "cyan", "green", "yellow"), cex=0.5)
+
+```
+*AOCS tumor-stroma gene signature: Heatmap showing the gene expression of the 688-gene tumor-stroma gene signature in AOCS high grade serous tumors (n=165) which have molecular subtypes C1, C2, C4, C5. Clusters generated by unsupervised cluster analysis of the  tumor-stroma gene signature significantly overlap with the AOCS molecular subtypes. If the dendrogram is cut at h=1, it produces 3 clusters; Tumor_Stroma_Cluster1 (n=71), Tumor_Stroma_Cluster2 (n=71) and Tumor_Stroma_Cluster3 (n=73).*
+
+
+From the above heatmap clustering analysis, we see that the AOCS tumor-stroma gene signature (which distinguises AOCS C1 microdissected tumor and stroma), also separates the AOCS tumors into the molecular subtypes, C1, C2, C4, C5.  If we cut the tree at a height of 1, it gives 3 clusters, with 71, 71 and 23 tumors respectively.  
+
+The first cluster (n=71) contains all of C4 and C5 tumors. It also had 11 of the C2 tumors and 1 C1 tumor.  This cluster could also be further split into groups containing C4 and C5 tumors. 
+
+C4 and C5 clustered together.
+
+- 30/30  Molecular subtype C4 tumor were in Tumor_Stroma_Cluster1
+- 29/29  Molecular subtype C5 tumor were in Tumor_Stroma_Cluster1
+
+
+The second cluster (n=71) contains almost exclusively C1 tumors. It has 68 C1 tumors and 3 C2 tumors.  The third cluster (n=23) was almost exclusively C2 tumors (22 tumor from C2 and 1 C1 tumor).
+
+- 68/70 Molecular subtype C1 tumors, were in Tumor_Stroma_Cluster2.
+- 22/36 Molecular subtype C2 tumors, were in Tumor_Stroma_Cluster3
+- 11/36 Molecular subtype C2 tumors, were in Tumor_Stroma_Cluster1
+
+
+There was a significant overlap in published AOCS molecular subtype classification for each high grade serous tumor (C1,C2,C4,C5) and the unsupervised clusters observed when expression profiles of tumor-stroma genes were clustered (p<2.2e-16)
+
+```{r hcT}
+TS0<-paste0("Tumor_Stroma_Cluster",cutree(aTree, h=1))
+#table(mm)
+m1<-table(paste0("C",aocs_eSet$k.means.Group[fil]), TS0)
+m1
+chisq.test(as.matrix(m1))
+```
+
+## Comparision of the tumor-stroma gene signature and genes that distinguish the AOCS molecular subtypes
+Given that the tumor-stroma gene signature appeared to distinguish the AOCS molecular subtypes, we compare the overlap in the gene signature to genes in the AOCS molecular subtype gene signature [@Tothill2008].
+
+The supplement from the Tothil et al., 2008  was downloaded from the CCR website (March 20th 2013). This contained lists of genes which distinguish the AOCS molecular subtypes (Supplementary table 2).  We curated this in GeneSigDB as 18698038-TableS2.  
+
+The number of genes that were up and down in each molecular subtype (C1,C2,C3,C4,C5,C6) in Supplemental Table 2 of Tothill et al., (PMID 18698038) is given below.  
+
+```{r aocsgenesSig}
+tothill<-read.csv(file.path(inputdir,"18698038", "18698038-TableS2.txt"), sep="\t", header=TRUE, as.is=TRUE)
+
+tt<-t(sapply(strsplit(as.character(tothill$Group), " "), function(x) c(x[1],x[2])))
+colnames(tt) = c("Subtype", "Direction")
+
+tt[,"Direction"]<-gsub("UP", "Up", tt[,"Direction"])
+tothill<-cbind(tothill,tt)
+tothill$Direction =as.character(tothill$Direction)
+tothill$Subtype= as.character(tothill$Subtype)
+
+tothill<-tothill[as.character(tothill$Subtype)%in%paste0("C", c(1,2,4,5)),]
+table(tothill[,6], tothill[,7])
+```
+
+The overlap in Affymetrix probe IDS between the AOCS molecular subtype gene signature for C1,C2,C4,C5  and the tumor-stroma gene signature (Suppl Table 1) is below.  In the tumor-stroma gene signature there were  tumor Affymetrix ProbeID (n= `r length(unique(geneSig[[1]]))`) and stroma Affymetrix probe IDs (n= `r length(unique(geneSig[[2]]))`), which were significantly different  (p<0.01).
+
+```{r overlapAOCS_TS}
+AOCS_sig<-tothill[tothill[,1]%in%featureNames(aocs_eSet),]
+cbind("Stroma Genes"=tapply(AOCS_sig[,1], AOCS_sig$Subtype, function(x) c(sum(x%in%c(geneSig[[1]])))), "Tumor Genes"=  tapply(AOCS_sig[,1], AOCS_sig$Subtype, function(x) c(sum(x%in%c(geneSig[[2]])))))
+```
+
+First, we explored the expression of the molecular subtype genes using hierarchical cluster analysis to reproduce the findings of Tothill et al., and confirm these genes do distinguish the subtypes C1, C2, C4 and C5. Hierarchical cluster was performed on centered data, using 1-Pearson Correlation Coefficient (PCC) as a distance and average linkage joining.  For the cluster analysis, we just examined the high grade serous ovarian cancer molecular subtypes (C1,C2,C4,C5).
+
+
+```{r aocsp}
+# Simplistics approach  The first columns is a list of all of the probesets. 
+aa<-made4::heatplot(aocs_eSet[unique(AOCS_sig[,1]),fil], classvec=aocs_eSet$k.means.Group[fil],classvecCol =c("gray80", "grey20", "navy", "cyan"), returnSampleTree=TRUE)
+
+legend("topright", legend=paste0("C", c(1,2,4,5)), fill=c("gray80", "grey20", "navy", "cyan"), cex=0.5)
+
+mm2<-paste0("MolecularSubtypeCluster",cutree(aa, h=1))
+#table(paste0("C",aocs_eSet$k.means.Group[fil]), mm2)
+```
+
+*Heatmap showing the gene expression of published AOCS gene signature for molecular subtypes C1,C2,C4,C5 (Tothil et al., 2008) in AOCS high grade serous tumors.  If the dendrogram is cut at h=1, it produces 3 clusters; MolecularSubtypeCluster1 (n=60), MolecularSubtypeCluster2 (n=61) and MolecularSubtypeCluster3 (n=44).*
+
+  
+
+I compared the classification of the AOCS molecular subtype gene signature and our AOCS tumor-stroma gene signature. There was a significant overlap in tumor clusters.
+
+- 60/70 Molecular subtype C1 tumors, were in MolecularSubtypeCluster2.
+- 32/36 Molecular subtype C2 tumors, were in MolecularSubtypeCluster3
+
+C4 and C5 clustered together.
+
+- 26/30  Molecular subtype C4 tumor were in MolecularSubtypeCluster1
+- 29/29  Molecular subtype C5 tumor were in MolecularSubtypeCluster1
+
+
+From this, AOCS subtypes C1, C2 are clearly distinst from C4 and C5 which cluster together using the molecular subtype genes provided in the tothill et al supplement.
+
+
+```{r MM_AOCS}
+## mm2 is the molecular subtype signature from AOCS
+## TS0 is the AOCS tumor-stroma signature
+
+table(paste0("C",aocs_eSet$k.means.Group[fil]),mm2)
+```
+
+There was a signficant overlap in the "observed" AOCS molecular subtypes and tumor_stroma clusters (p<0.001).  These were  the clusters observed by unsupervised hierarchical clusters analysis
+
+```{r T0_mm2}
+## mm2 is the molecular subtype signature from AOCS
+## TS0 is the AOCS tumor-stroma signature
+
+x1<-table(TS0,mm2)
+x1
+chisq.test(as.matrix(x1))
+```
+
+
+## Supplementary Figure 1: The AOCS signature gene expression in the MGH tumors 
+
+We examined the gene expression of the AOCS 688-gene signature tumor-stroma gene signature in an indepdent dataset, the MGH dataset of microdissected tumor and stroma samples. 
+
+The AOCS signature correctly partitioned all but one of the microdissected tumor and stroma MGH samples using unsupervised hierarchical cluster analysis (Supplementary Figure 1).
+
+In Fig S1 we see a heatmap of gene expression of the AOCS tumor-stroma gene signature in the MGH Normal stroma, tumor stroma and tumor tissue.  The AOCS C1 tumor-stroma gene signature distinguished microdissected tumor and stroma in the MGH dataset.
+
+
+
+
+```{r FigS1, echo=FALSE, message=FALSE, include=TRUE, fig.cap="Figure S1: The AOCS signature partitioned all but one of the microdissected tumor and stroma MGH samples using unsupervised hierarchical cluster analysis"}
+#pdf(file="heatplot_SchwedeSig_BirrerData.pdf")
+
+aTree2<-heatplot(birrer_eSet[c(geneSig[[1]],geneSig[[2]]),], classvec=birrer_eSet$ShortLabel, classvecCol =c("yellow", "green3", "navy"),classvec2=factor(rep(c("S", "T"), times=sapply(geneSig,length)[1:2])),classvec2Col =c("green3", "yellow"), labCol=birrer_eSet$ShortLabel, labRow="",returnSampleTree = TRUE)
+legend("topright", legend=c( "Tumor", "Stroma","Normal"), fill=c( "yellow", "green3","navy"), cex=0.5)
+
+```
+
+
+
+We observe 2 clusters, which distinguishes, the 38 dissected tumor samples from the normal stroma (n=10) and tumor stroma (n=38).  There is 1 tumor stroma sample that clusters with the tumor tissue. 
+
+This shows that although the tumor-stroma gene signature which was extracted from n=4 matched tumor and stroma from C1 samples in the AOCS dataset, it can distinguish an independent dataset of microdissected tumor and stroma. 
+
+```{r xtab}
+Birrer1<-cutree(aTree2, h=1)
+#table(mm)
+m1<-table(birrer_eSet$sample_type, Birrer1)
+m1
+```
+
+## MGH Tumor-Stroma Signature (Table 2, 512 gene signature)
+
+In an independent analysis of the MGH dataset, we identified a gene signature of 512 unique genes that discriminated paired microdissected tumor and stroma from 38 patients from the MGH study of high grade serous ovarian cancers (n = 76). 
+
+These 512 unique gene symbols that contained 431 and 81 genes that had higher expression in stroma and tumor, respectively (Supplementary Table 3). 
+
+
+```{r birrerSTsig, warnings=FALSE, message=FALSE, echo=TRUE}
+ library(limma)
+ ST<-birrer_eSet[,!birrer_eSet$sample_type =="Normal"]
+ Pair<-factor(factor(ST$alt_sample_name))
+ Cell<-factor(ST$sample_type)
+ design<-model.matrix(~Pair+Cell)
+ fit_pair<-lmFit(ST,design)
+ fit_pair <- eBayes(fit_pair)
+res<- topTable(fit_pair, coef="CellStroma", p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST))
+
+# exclude any genes that parition by stroma batch or tumor batch
+birrer_eSet$batch_yrsMonth= substr(birrer_eSet$batch,1,7)
+birrer_eSet$batch_yrs= substr(birrer_eSet$batch,1,4)
+
+ST<-birrer_eSet[,birrer_eSet$sample_type =="Tumor"]
+design<-model.matrix(~vital_status+batch_yrsMonth, data=ST)
+fit<-lmFit(ST,design)
+fit <- eBayes(fit)
+b<-grep("batch",colnames(coef(fit)))
+batchT<-lapply(b, function(x) topTable(fit, coef=x, p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST)))
+batchT<- unlist(lapply(batchT, function(x) x$ID))
+
+ST<-birrer_eSet[,!birrer_eSet$sample_type =="Tumor"]
+design<-model.matrix(~batch_yrsMonth, data=ST)
+fit<-lmFit(ST,design)
+fit <- eBayes(fit)
+b<-grep("batch",colnames(coef(fit)))
+batchS<-lapply(b, function(x) topTable(fit, coef=x, p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST)))
+batchS<- unlist(lapply(batchS, function(x) x$ID))
+
+```
+
+Genes that overlapped with the those significantly different between batches were excluded.
+
+The numbers of Affmetrix IDs, and their gene symbols are below.  
+
+```{r birrerSTsig2, warnings=FALSE, message=FALSE}
+
+BirrerStromaSig<-res[res$adj.P.Val<0.0000000001&res$logFC>0,1]
+BirrerTumorSig<-res[res$adj.P.Val<0.0000000001&res$logFC<0,1]
+
+# Exclude probes associated with batch
+# There was only 1 probe in the Tumor Genes also associated with batch
+# There was 55 probes in the Stroma Genes also associated with batch
+# There were removed
+BirrerTumorSig<- BirrerTumorSig[!BirrerTumorSig %in% c(batchS, batchT)]
+BirrerStromaSig<- BirrerStromaSig[!BirrerStromaSig%in% c(batchS, batchT)]
+
+
+write.csv(res[BirrerTumorSig,], file=file.path(outdir,"BirrerStromaSig.csv"))
+write.csv(res[BirrerStromaSig,], file=file.path(outdir,"BirrerTumorSig.csv"))
+
+
+## Map Affymetrix IDs to Gene Symbols
+library(annotate)
+library("hgu133plus2.db")
+
+BirrerTumorSigHGNC<-unique(as.character(getSYMBOL(BirrerTumorSig, "hgu133plus2.db")))
+BirrerStromaSigHGNC<-unique(as.character(getSYMBOL(BirrerStromaSig, "hgu133plus2.db")))
+
+## Remove NA
+BirrerTumorSigHGNC<-BirrerTumorSigHGNC[!is.na(BirrerTumorSigHGNC)]
+BirrerStromaSigHGNC<-BirrerStromaSigHGNC[!is.na(BirrerStromaSigHGNC)]
+
+BirrerSig<-list(BirrerStromaSig,BirrerTumorSig,BirrerStromaSigHGNC,BirrerTumorSigHGNC)
+names(BirrerSig) =names(geneSig)
+sapply(BirrerSig[1:2],function(x)length(unique(x)))
+sapply(BirrerSig[3:4],function(x)length(unique(x)))
+
+####$$$$$$$$############
+# Actually Suppl Table
+x<-supplTabs[[3]]
+sapply(x[1:2], n_distinct, na.rm=TRUE)
+sapply(x[3:4], n_distinct, na.rm=TRUE)
+#geneSig<-as.list(geneSig)
+#geneSig<-lapply(geneSig, function(x) x[!is.na(x)])
+```
+
+The signature distinguishes tumor and stroma in the MGH dataset. 
+ 
+
+```{r tt, message=FALSE}
+heatplot(birrer_eSet[c(BirrerSig[[1]], BirrerSig[[2]]),], classvec=birrer_eSet$sample_type,  labCol=birrer_eSet$ShortLabel, labRow="", classvecCol = c( "yellow", "green3","navy"),classvec2=factor(rep(c("Stroma", "Tumor"), times=sapply(BirrerSig,length)[1:2])),classvec2Col =c("green3", "yellow"))
+
+legend("topright", legend=c( "Tumor", "Stroma", "Normal"), fill=c( "yellow", "green3","navy"), cex=0.5)
+
+
+```
+
+*A heatmap showing that the MGH gene signature distinguished the microdissected tumor and stroma in MGH tumors.*
+
+We looked at the gene expression of the MGH signature in the AOCS gene expression dataset. 
+
+```{r MGH_aocsTree, message=FALSE}
+aTree_MGH<-heatplot(aocs_eSet[c(BirrerSig[[1]], BirrerSig[[2]]),fil], classvec = factor(aocs_eSet$k.means.Group[fil]), classvec2=factor(rep(c("Stroma", "Tumor"), times=sapply(BirrerSig, length)[1:2])),labRow="", classvecCol =c("gray80", "grey20", "navy", "cyan"),  classvec2Col =c( "green", "yellow"), returnSampleTree = TRUE)
+         
+legend("topright", legend=c(paste0("C",c(1,2,4,5)), "Stroma", "Tumor"), fill=c("gray80", "grey20", "navy", "cyan", "green", "yellow"), cex=0.5)
+```
+*A heatmap showing that the MGH gene signature distinguished molecular subtypes C1 from the other AOCS molecular subtypes*
+
+We cut the dendrogram at h=1, and this provided 3 clusters, which contained 76, 63 and 26 tumors respectively.  MGH_cluster2 was distinguished from MGH_cluster1 and MGH_cluster3 by stromal gene expression.
+
+```{r MGH_AOCS}
+Birrer1_aocs<-cutree(aTree_MGH, h=1)
+#table(mm)
+x<-table(paste0("C",aocs_eSet$k.means.Group[fil]), paste0("MGH_cluster",Birrer1_aocs))
+x
+chisq.test(x)
+```
+
+* MGH_cluster1 was characterised by high gene expression of stromal genes and contained mostly C1 (64/70) and a few C5 (n=5) tumors
+
+* MGH_cluster2 was characterised by contained mostly C4 (30/30), C5 (20/29) and some C2 (n=12) tumors. It tended to have lower gene expression of stromal genes.
+
+* MGH_cluster3 was under-enrichmed in C4 (n=0), C5 (n=3) tumors and was composed mostly of C2 tumors (n=18) and some C1 (n=5).
+
+
+## Overlap in the AOCS C1 and MGH tumor-stroma gene signatures
+The two gene signatures shared significant overlap; 23/81 genes over-expressed in tumor (Fisher’s exact test p < 10-16) and 121/431 genes over-expressed in stroma (p < 10-16) in the MGH gene signature were also present in the AOCS gene signature. 
+
+
+```{r FisgerTests}
+AllSymbols=unique(as.character(getSYMBOL(featureNames(birrer_eSet),"hgu133plus2.db")))
+
+# Test of Fisher Test
+for (i in c(3,4)) {
+  A<- length(intersect(geneSig[[i]], BirrerSig[[i]]))
+  B<- length(geneSig[[i]]) -A
+  C<- length(BirrerSig[[i]]) -A
+  D<- length(AllSymbols)- length(geneSig[[i]]) - length(BirrerSig[[i]]) + A
+  xSig=matrix(c(A,B,C,D),2,2, dimnames = list(AOC = c("In Sig", "Not in Sig"), MGH = c("In Sig", "Not in Sig")))
+  xSig
+  fisher.test(xSig, alternative="greater")# p-value < 2.2e-16
+}
+#fisherT(geneSig[[3]], BirrerSig[[3]], universe=AllSymbols)
+#fisherT(geneSig[[4]], BirrerSig[[4]], universe=AllSymbols)
+```
+
+
+```{r BirrerIntersect, fig.width=8, fig.height=10}
+par(mfrow=c(2,2))
+
+venn(list(MGH_Stroma=BirrerSig[[3]], AOCS_Stroma=geneSig[[3]]))
+title(main="Stroma Gene Symbols")
+venn(list(MGH_Tumor=BirrerSig[[4]],AOCS_Tumor=geneSig[[4]]))
+title(main="Tumor Gene Symbols")
+
+venn(list(MGH_Stroma=BirrerSig[[1]], AOCS_Stroma=geneSig[[1]]))
+title(main="Stroma Affymetrix Probe IDs")
+venn(list(MGH_Tumor=BirrerSig[[2]],AOCS_Tumor=geneSig[[2]]))
+title(main="Tumor Affymetrix Probe IDs")
+
+
+```
+
+
+
+
+
+# Global differential gene expression analysis of AOCS tumor molecular subtypes 
+
+As part of our analysis we performed global differential gene expression analysis between each pair of AOCS tumor molecular subtypes (C1, C2, C4, and C5) (limma, 2-fold and p < 0.001 after FDR correction).  We compared these genelists to genes which distinguished tumor and stroma. 
+
+The number of genes that discriminated between each pair of subtypes varied in size from 343 (C1 vs. C2) to 1,267 (C1 vs. C5) unique gene symbols. 
+
+```{r AOCSgenes}
+#table(tothill$Subtype)
+
+MSgenes<-read.csv(file.path(datadir,"AOCS subtype specific genes.csv"), as.is=TRUE, row.names=1, na.strings = "AAAAAAAAAA")
+
+x<-apply(MSgenes, 2, function(x) sum(!is.na(unique(x))))
+x<-cbind(Affymetrix_ID=x[grep("Affy", names(x))], Gene_Symbol=x[grep("Gene", names(x))])
+rownames(x)<-gsub("\\.+", "_", gsub("...Affy", "", rownames(x)))
+
+x
+```
+
+We examined the overlap between these molecular subtypes gene lists and the stromal and tumor gene sets (Supplementary Table 4). We observed that any contrast involving C1 had strong overlap with the stromal gene set (Fisher’s test p < 10-301), as did the contrast of C2 vs. C4 (Fisher’s test p < 10-264). There was a large overlap in genes (53%, 41%) that were differentially expressed between tumor and stromal cells and those that significantly different in contrasts of C1 vs. C2 or C1 vs. C4 respectively. This suggests that these subtypes, especially C1, may be driven by different amounts of stromal gene expression. 
+
+The genes reported in Schwede et al., Supplementary Table 4 (pairwise comparisions of C1,C2,C4 and C5) were compared to the molecular subtype gene expression reported in Supplemental Table 2 of Tothill et al., 2012 (PMID 18698038). There were 658 genes that were associated with C1 (180, up, 478 down). The overlap (of Affymetrix Probe IDs) is given in the set of four venn diagrams.
+
+```{r AOCSvenn, fig.width=7, fig.height=4,echo=FALSE}
+venn(list(AOCS_C1=unique(AOCS_sig[AOCS_sig$Subtype=="C1",1]),C1vC2=unique(MSgenes[,1]), C1vC4=unique(MSgenes[,3]), C1vC5=unique(MSgenes[,5])))
+title(main="C1 v other tumors")
+venn(list(AOCS_C2=unique(AOCS_sig[AOCS_sig$Subtype=="C2",1]),C2vC1=unique(MSgenes[,1]), C2vC4=unique(MSgenes[,7]), C2vC5=unique(MSgenes[,9])))
+title(main="C2 v other tumors")
+venn(list(AOCS_C4=unique(AOCS_sig[AOCS_sig$Subtype=="C4",1]),C4vC1=unique(MSgenes[,3]), C4vC2=unique(MSgenes[,7]), C4vC5=unique(MSgenes[,11])))
+title(main="C3 v other tumors")
+venn(list(AOCS_C5=unique(AOCS_sig[AOCS_sig$Subtype=="C5",1]),C5vC1=unique(MSgenes[,5]), C5vC2=unique(MSgenes[,9]), C5vC4=unique(MSgenes[,11] )))
+title(main="C4 v other tumors")
+```
+# create list of genelists (symbols) and compare overlap
+
+```{r}
+# read 0.05 genelists suppl table
+gg<-readxl::read_xlsx("../../CCR_SupplementaryTables 2.xlsx", sheet = 2, skip=4)
+gg2<-readxl::read_xlsx("../../CCR_SupplementaryTables 2.xlsx", sheet = 3, skip=4)
+gg2<-as.list(gg2[,seq(2,ncol(gg2),2)])
+names(gg2)<-gsub(" ", "", names(gg2))
+names(gg2)<- sub("-Gene", "", names(gg2))
+names(gg2)<- sub("Mesenchymal", "Mes", names(gg2))
+names(gg2)<- sub("Immunoreactive", "Imm", names(gg2))
+names(gg2)<- sub("Differentiated", "Diff", names(gg2))
+names(gg2)<- sub("Proliferative", "Prof", names(gg2))
+names(gg2)<- sub("s.", "", names(gg2))
+
+ll <-list(AOCS_Stroma=geneSig$Stromal_GeneSymbols,AOCS_Tumor=geneSig$Tumor_GeneSymbols,
+          AOCS_Stroma001= unique(gg$`Stromal gene symbols...7`[!is.na(gg$`Stromal gene symbols...7`)]),
+         AOCS_Tumor001=  unique(gg$`Tumor gene symbols...8`[!is.na(gg$`Tumor gene symbols...8`)]),
+          MGH_Stroma=BirrerSig$Stromal_GeneSymbols, MGH_Tumor= BirrerSig$Tumor_GeneSymbols, AOCS_C1=AOCS_sig[AOCS_sig$Subtype=="C1","SYMBOL"],C1vC2=MSgenes[,2], C1vC4=MSgenes[,4], C1vC5=MSgenes[,6], C2vC4=MSgenes[,8],C2vC5=MSgenes[,10],C4vC5=MSgenes[,12])
+
+ll<-c(ll,gg2)
+ll<-lapply(ll, unique)
+ll<-lapply(ll, function(x) x[!is.na(x)])
+
+ll<-ll[!duplicated(names(ll))]
+sapply(ll, length)
+```
+
+```{r}
+library(UpSetR)
+overlapMat<-fromList(ll)
+ids = unique(unlist(ll))
+upset(overlapMat, keep.order=TRUE, nsets= ncol(overlapMat), order.by = "freq", decreasing=TRUE, nintersects=30)
+overlapMat <-as.matrix(overlapMat)
+rownames(overlapMat) =ids
+```
+
+# Extract stats and overlaps
+
+```{r}
+overlapMat<-overlapMat[order(rowSums(overlapMat), decreasing=FALSE),]
+overlapMat<-as.data.frame(overlapMat)
+#heatmap(overlapMat, scale="none")
+```
+
+```{r}
+pairwiseComb <- combn(colnames(overlapMat), 2)
+
+res<-apply(pairwiseComb, 2, function(x) {
+  f  = fisher.test(table(overlapMat[,x]),alternative="greater")$p.value
+  s  = round(sum(rowSums(overlapMat[,x])==2))
+  n1 = sum(overlapMat[,x[1]])
+  #print(n1)
+  n2 = sum(overlapMat[,x[2]])
+  p1 = round(100*sum(rowSums(overlapMat[,x])==2)/sum(overlapMat[,x[1]]),2)
+  p2 = round(100*sum(rowSums(overlapMat[,x])==2)/sum(overlapMat[,x[2]]),2)
+  r= c(P.value_fdr_fisherGreater = f,  n_genelist1=n1, n_genelist2=n2,intersect=s,  percent1=p1, percent2=p2)
+  return(r)
+  })
+res<-as.data.frame(t(res))
+rownames(res) = apply(pairwiseComb, 2, paste, collapse = " vs ")
+res[,1]<-p.adjust(res[,1], "fdr")
+
+
+
+
+res[grep("^AOCS_Stroma001", rownames(res)),]
+res[grep("^MGH", rownames(res)),]
+write.csv(res, file="./results_fisher_overlapGenelists.csv")
+```
+
+
+# Overlap between MS genes and MGH
+
+```{r}
+overlapMat<-fromList(list(AOCS_C1=unique(AOCS_sig[AOCS_sig$Subtype=="C1",1]),C1vC2=unique(MSgenes[,1]), 
+                          C1vC4=unique(MSgenes[,3]), C1vC5=unique(MSgenes[,5])))
+```
+
+
+# Predicting AOCS and TCGA molecular subtype
+Given that the published molecular subtypes have a significant number of genes that are expressed in tumor stroma, we investigated if the published molecular subtypes gene are stable to changes in the proportion of stromal cells. 
+ 
+Gene lists that predict AOCS molecular and TCGA subtypes were downloaded as online publication supplements  [@Tothill2008,@Verhaak2013] curated and submitted to GeneSigDB [@Culhane2012]. 
+ 
+For each, we built a classify molecular subtype using the published gene signatures. A simple single sample predictor (SSP) approach was used for classification  [@HaibeKains2012; @Perou2000]. Tumors were classified as a molecular subtype, if a tumor had highest Spearman correlation to the median gene expression profile of the subtype, compared to the correlation to the median gene expression of the other subtypes.
+
+Since each of the datasets, were Affymetrix and the same platform, I used a simple nearest centroid predictor. 
+
+
+## The AOCS molecular subtypes: building a classifier
+
+```{r buildaocs}
+aocs.sig=unique(AOCS_sig[,1])
+if (!file.exists(file.path(datadir,"AOCS_Classifier_TothillGenes.Rda"))) {
+  aocs.scm<-build.aocs(aocs_eSet, aocs.sig)
+  save(aocs.scm,aocs.sig,file=file.path(datadir,"AOCS_Classifier_TothillGenes.Rda"))
+}
+```
+
+```{r loadAOCSModel}
+load(file.path(datadir,"AOCS_Classifier_TothillGenes.Rda"))
+```
+
+The Single Sample Predictor (SSP) classifier was trained using the published gene lists of the AOCS C1, C2, C4 and C5 molecular subtypes. The SSP identifies the subtype of a single tumor using a nearest centroid classifier and has been widely applied in molecular subtype classification in breast cancer  [@HaibeKains2012; @Perou2000].   It  predicted the AOCS molecular subtypes with an overall **self-validation accuracy** of 95%.  Sensitivity and specificityfor each subtype were is given below.
+
+```{r aocsPred}
+aocsPredict<-predict.aocs(eSet=aocs_eSet, aocs.model=aocs.scm, corThres=0.7)
+#table(factor(aocsPredict$Predict), factor(aocs_eSet$k.means.Group))
+#table(factor(aocs_eSet$MS), factor(aocs_eSet$k.means.Group))
+print(confusionMatrix(factor(aocsPredict$Predict), factor(aocs_eSet$MS, levels=levels(factor(aocsPredict$Predict)))))
+
+
+n=nrow(aocsPredict[order(aocs_eSet$MS),])
+
+plot.predict(aocsPredict[order(aocs_eSet$MS),], reorderByClass = FALSE, colLab=rep("", 220),xlab="Tumors") 
+abline(v=cumsum(table(aocs_eSet$MS))+.5)
+ mtext(c("C1 ", "   C2 " , "    C3 ","    C4 ", "Unclassified"),at=c(20,cumsum(table(aocs_eSet$MS))), adj=0)
+title(main="Correlation of AOCS tumors to C1,C2,C4,C5 centroids")
+```
+
+In each case tumors were assigned to the subtype centroid to which it has highest correlation. Where there was no "winner", tumors has low correlation to all subtypes (cor<0.7), it was  unclassfied. 
+
+```{r aocsClassSucc, fig.width=8, fig.height=10}
+aocsPredict[aocsPredict$Predict=="Unclassified",]
+par(mfrow=c(2,2))
+for (i in colnames(aocsPredict)[1:4]) {boxplot(aocsPredict[aocsPredict$Predict==i,1:4], main=paste0("Classification of ",i ), las=3,ylim=c(0.4,1)); abline(h=0.7,lty=2,col="red" )}
+```
+
+It can be seens that C1 and C2 tumors, showed weaker correlation but >0.7 correlation to C1,C2 and C4 tumors. C1 and C2 tumors had lowest correlation to C5 tumors. Consistent with this, C5 were easier to classify, and mostly had <0.7 correlation to C1,C2,C4. This was reflect in the confusious matrix above, were C5 tumors were classified with the higher Balanced Accuracy (0.98), Sensitivity (0.97) and Specificity (0.99).
+
+*Spearman correlation of `r n` AOCS tumor samples to the centroid predictor for molecular subtype C1 (light grey), C2 (dark grey), C4 (navy), C5 (cyan).*
+
+## AOCS molecular subtypes in microdissected tumor and stroma 
+
+When the AOCS classifier was applied to epithelial carcinoma cells microdissected from HGSOC tumors in the (MGH dataset n = 38), most microdissected tumors were assigned to subtype C4. 
+
+```{r TestBirrerAOCS}
+Tumors<-birrer_eSet[,birrer_eSet$sample_type=="Tumor"]
+Tumors<-Tumors[,order(Tumors$alt_sample_name)]
+Stroma<-birrer_eSet[,birrer_eSet$sample_type=="Tumor_Stroma"]
+Stroma<- Stroma[,order(Stroma$alt_sample_name)]
+if (!identical(Stroma$alt_sample_name, Tumors$alt_sample_name)) print("sample names not identifcal")
+
+birrerPredict<-predict.aocs(Tumors, aocs.model=aocs.scm,corThres=0.7)
+birrerPredict2<-predict.aocs(Stroma, aocs.model=aocs.scm,corThres=0.7)
+```
+
+
+Most microdissected Tumor samples were classified to AOCS subtype C4 (n=20/38).  
+
+```{r classT}
+table(birrerPredict$Predict, as.character(Tumors$sample_type))
+```
+
+By contrast most tumor-stroma were classified to C1 or unclassifed.
+```{r classS}
+table(birrerPredict2$Predict, as.character(Stroma$sample_type))
+```
+
+```{r plotAOCSpred}
+
+plot.predict(birrerPredict, colLab=Tumors$alt_sample_name, xlab="Tumors") -> x
+title(main="Correlation of MGH tumors to C1,C2,C4,C5")
+```
+* Spearman correlation of 38 MGH microdissected tumors to the centroids of AOCS subtpes C1,C2,C4,C5*
+
+```{r plotAOCSpred2}
+plot.predict(birrerPredict2[x,], colLab=Tumors$alt_sample_name[x], reorderByClass = FALSE, xlab="Stroma") -> x
+title(main="Correlation of MGH tumor-stroma to C1,C2,C4,C5")
+```
+
+* Spearman correlation of 38 MGH microdissected tumor stroma to the centroids of AOCS subtpes C1,C2,C4,C5.  (Note stroma samples are ordered as above)*
+
+
+## AOCS molecular subtype classification is modified by stroma proportion 
+We investigated if the gene signature classifiers of these molecular subtypes were stable to changes in the proportion of stromal cells. 
+
+
+Paired microdissected tumor and stroma (n = 38) were computationally mixed in increasing increments of 10%, as described previously [@Elloumi2011].  The expression value of each tumor gene (Gt) was mixed with gene expression value of its adjacent stroma (Gs) using the linear combinations mGt + (1-m)Gs  where mixing parameter m is the proportion of tumor and 1-m is the proportion of stroma. The mixing parameter m was incremented by 0.1 from 0 to 1. This was performed for all genes in the molecular subtype classifier to produce a computationally simulated tumor/stroma profile. The assumption of linearity has been previously supported by comparing the computational values to those observed in gene expression of co-cultured cells for the breast molecular subtype PAM50 gene signature  [@Camp2011; @Elloumi2011]
+
+
+
+
+```{r Mix_birrer_Predict, warning=FALSE, fig.width=5, fig.height=3}
+
+## Mix match Tumor and Stroma data
+  Sp=  seq(0, 1, 0.1)
+  Tp = 1-Sp
+  mixRes<-lapply(1:11, function(i) predict.aocs(((exprs(Tumors)*Tp[i])+(exprs(Stroma)*Sp[i])),aocs.model=aocs.scm,corThres=0.7)) 
+    
+ 
+
+#sapply(mixRes, function(x) x$Predict)
+
+## Order C1-C5 in 100% tumor
+ind<-order(mixRes[[1]]$Predict, decreasing=TRUE)
+aocsCols<-c("gray80","gray20", "navy", "cyan")
+z<-sapply(mixRes, function(x) as.numeric(sub("C", "",x$Predict[ind])))
+
+
+nr=nrow(z)
+nc=ncol(z)
+image(1:nc, 1:nr, t(z), col=aocsCols, ylab="Microdissected Tumors", xlab="Proportion Tumor", xaxt="n", yaxt="n", oldstyle=TRUE)
+axis(1, 1.5:11.5, paste(Tp, sep=""),tck = 1, col = "grey", lty = "dotted", cex.axis=0.8)
+axis(2, 1:nr, labels=Tumors$ShortLabel[ind], tck=0, las=2, lwd=0,cex.axis=0.7)
+legend("bottomright", legend=c("C1","C2", "C4", "C5", "Unclassified"), fill=c(aocsCols,"white"), cex=.8)
+#dev.off()
+```
+
+*Fig: Microdissected Tumor gene expression were computationally mixed with their paired stromal gene expression profiles in increasing increments of 10%, and was classified as AOCS subtypes C1,C2,C4,C5 using a SSP classifier*
+
+From the results, it was clear that even 10% change in the stroma proportion could change the molecular subtype classification of C2 and C4 tumors.
+
+
+## The TCGA molecular subtypes
+
+The TCGA study [@TCGA2012] have described four high grade serous ovarian cancer molecular subtypes which are correlated to following the AOCS subtypes;
+
+```{}
+-------     -----------
+  AOCS      TCGA
+------      ------------
+  C1        mesenchymal
+  C2        immunoreative
+  C4        differentiated *
+  C5        proliferative
+------      --------------
+ 
+ * Note, C4 also correlated to immunoreative.
+```
+
+
+We downloaded a 100 gene signature of the TCGA molecular subtypes which was published as Supplementary Table 7 in the research article by Verhaak et al [@Verhaak2013]
+
+Of these 100 genes, 90 were in the Bioconductor curatedOvarianData TCGA_eset [@Ganzfried2013]
+
+
+```{r TCGA100Genes, warning=FALSE, message=FALSE}
+# Read TCGA 100 Gene Signature
+tcgaGenes<-read.table(file.path(datadir,"Verhaak_13_CLOVAR100_Subtype.csv"), header=TRUE,  sep=",", as.is=TRUE)
+```
+
+```{r readTCGA}
+library(curatedOvarianData)
+data("TCGA_eset")
+
+boxplot(cbind(TCGA_eset$percent_normal_cells, TCGA_eset$percent_tumor_cells,TCGA_eset$percent_stromal_cells), ylim=c(0,100), names=c("N", "T", "TS"), col=c("grey", "yellow2", "green3"))
+
+## Read the predicted subtypes of datasets
+tcgaAnnotSubtypes<-read.table(file.path(datadir, "Verhaak_13_suppl_SupplTab1.csv"), header=TRUE,  sep=",", skip=1, as.is=TRUE)
+#table(tcgaAnnotSubtypes$DATASET)
+
+```
+
+```{r subTCGA}
+
+# Filter the TCGA genes to those present in the curatedOVarianData TCGA_eset
+print("Number of TCGA genes in the curatedOVarianData eset")
+print(table(tcgaGenes[,1]%in%featureNames(TCGA_eset)))
+tcgaGenes<-tcgaGenes[tcgaGenes[,1]%in%featureNames(TCGA_eset),]
+
+```
+
+The TCGA_eSet in the curated ovarian data contained 578 samples. Among these,  488 were in the discovery set, and we knew the tumor TCGA subtype classification.
+ 
+
+```{r Compare_TCGA_Annot}
+## Short code to compare the annotation of the 489 discovery subset from the first and second TCGA papers
+## TCGA_489_UE.k4.txt was emailed by Roel Verhaak with the subtypes from the first TCGA paper
+
+# Read TCGA tumor subtypes from the first TCGA paper.
+tcgaSubtypesPaper1<-read.table(file.path(datadir, "TCGA_489_UE.k4.txt"), sep="\t", header=TRUE, as.is=TRUE)
+
+## Create a vector of the shortened Sample ID
+tcgaSubtypesPaper1[,3]<-sub("-01[A,B,C,D]-0[1,2,3]R$", "", gsub("\\.", "\\-", tcgaSubtypesPaper1[,1]))
+rownames(tcgaSubtypesPaper1) = tcgaSubtypesPaper1[,3]
+tt2<-tcgaAnnotSubtypes[grep("TCGA-discover",tcgaAnnotSubtypes$DATASET),]
+rownames(tt2) = tt2$ID
+TCGA_eset$SUBTYPE= tt2[TCGA_eset$unique_patient_ID,]$SUBTYPE
+TCGA_eset$DATASET = "Validation"
+TCGA_eset$DATASET[TCGA_eset$unique_patient_ID %in% tt2$ID]  ="DISCOVERY"
+  
+## Rownames are the same
+#comparelists(rownames(tt2), rownames(tt1))
+tcgaSubtypesPaper1<-tcgaSubtypesPaper1[rownames(tt2),]
+
+## All TRUE, good annotation has not changed
+if (!identical(tcgaSubtypesPaper1$k4, tt2$SUBTYPE)) print("TCGA annotation issue")
+```
+
+```{r TCGA_subtypes_TCGAgenes}
+#TCGA_eset[tcgaGenes[,1],]
+table(TCGA_eset$DATASET,TCGA_eset$SUBTYPE)
+```
+
+A hierarchical cluster analysis of the 90 molecular subtype genes, partitioned the TCGA tumor samples into subtypes. The Differentiated and Immunoreative clustered apart from the Mesenchymal and Proliferative subtypes.  
+
+```{r TCGAHeatmap}
+heatplot(TCGA_eset[as.character(tcgaGenes[,1]),], classvec=TCGA_eset$SUBTYPE,classvecCol =c("gray80", "grey20", "navy", "cyan"))
+legend("topright", legend=levels(factor(TCGA_eset$SUBTYPE)), fill=c("gray80", "grey20", "navy", "cyan"), cex=0.5)
+```
+
+One of the samples in the Verhaak annotation was missing in TCGA_eSet."TCGA-13-0760" is absent in the curatedOvarianData package.   There are also 2 other samples ("TCGA-61-2611", "TCGA-61-2610" ) listed in the validation set that are missing.
+
+```{r missing}
+table(tcgaAnnotSubtypes[tcgaAnnotSubtypes[,1]%in%TCGA_eset$unique_patient_ID, "DATASET"])
+tt2<-tcgaAnnotSubtypes[grep("TCGA",tcgaAnnotSubtypes$DATASET),]
+comparelists(tt2[,1],TCGA_eset$unique_patient_ID)$Set.Diff
+#comparelists(TCGA_eset$unique_patient_ID, tt2[,1])$Set.Diff
+```
+
+
+
+
+## The TCGA molecular subtypes: building a classifier
+
+We built a SSP classifier of TCGA molecular subtypes using the 100 gene signature which were published as Supplementary Table 7 in the research article by Verhaak et al  [@Verhaak2013]
+
+There were 90 of the 100 genes in the curatedOvarianData TCGA_eset and this subset of 90 were used to train the SSP classifier.  This performed with an overall self-validation accuracy of 89%. 
+
+
+For a quick a dirty will use same approach as AOCS, then will build model
+```{r tcgaSCM}
+tcga_scm<-build.tcga() 
+predictTCGA<-predict.tcga(eSet=TCGA_eset,  tcga.model=tcga_scm, corThres=0.7)
+
+print(confusionMatrix(factor(predictTCGA$Predict), factor(TCGA_eset$SUBTYPE, levels=levels(factor((predictTCGA$Predict))))))
+```
+
+
+```{r}
+plot.predict(predictTCGA,xlab="Tumors") ->x3
+
+mtext(c("  Differentiated", "Immunoreactiv", " Mesenchymal","    Proliferative", "UNC"),at=c(1,cumsum(table(predictTCGA$Predict)[1:4])), adj=0)
+title(main="Correlation of TCGA tumors to subtype centroids")
+```
+
+## TCGA molecular subtypes in microdissected tumor and stroma 
+
+We applied  TCGA molecular subtype SSP classifier to the MGH microdissected dataset.
+
+```{r tcgaGenes}
+# Mapping gene symbols to probes
+tcgaProbes<-fData(TCGA_eset)[as.character(fData(TCGA_eset)$gene)%in%as.character(tcgaGenes[,1]),]
+tcgaGenes<-cbind(tcgaGenes,tcgaProbes[as.character(tcgaGenes[,1]),])
+#93 genes/probes, 1:1 match
+tcgaGenes$probeset<-as.character(tcgaGenes$probeset)
+#TCGA_eset[featureNames(TCGA_eset)%in%tcgaGenes[,1],]
+```
+
+```{r birrerSubset}
+# Subsetting the MGH dataset to the 90 genes of the TCGA classifier
+Tumors2<- Tumors[tcgaGenes$probeset,]
+Stroma2<- Stroma[tcgaGenes$probeset,]
+featureNames(Tumors2) = as.character(tcgaGenes$gene)
+featureNames(Stroma2) = as.character(tcgaGenes$gene)
+
+```
+
+Most microdissected tumors were assigned either to the differentiated subtype, which is similar to the AOCS C4 subtype (23/38). Fewer were classified as proliferative subtype (8/38), which is similar to C5 (Figure 4B). Few tumors were assigned to Mesenchymal (n=2) or Immunoreactive (n=3).  Two samples were unclassified.
+
+
+```{r predictT}
+pt<-predict.tcga(Tumors2, tcga.model=tcga_scm, corThres=0.7)
+
+print("AOCS subtypes in microdissected tumors")
+table(pt$Predict)
+```
+
+```{r plotPredictT}
+#tt<-plot.predict(pt)
+tt<-plot.predict(pt, colLab=Tumors2$alt_sample_name, reorderByClass = TRUE, xlab="Tumor") -> x
+title(main="Correlation of MGH tumor-stroma to TCGA subtyes")
+```
+
+*Spearman correlation of 38 MGH microdissected tumors to the centroids of TCGA subtpes *
+
+
+By contrast almost all stroma samples were closer to the Mesenchymal (20/38) subtype and many were unclassified (18/38), which is consistent with results observed with the AOCS classifier.
+
+```{r predictS}
+st<-predict.tcga(Stroma2, tcga.model=tcga_scm, corThres=0.7)
+print("AOCS subtypes in microdissected stroma")
+table(st$Predict)
+```
+
+```{r TCGAplotPredictS}
+tt<-plot.predict(st, colLab=Stroma2$alt_sample_name, reorderByClass = TRUE, xlab="Stroma") -> x
+title(main="Correlation of MGH tumor-stroma to TCGA subtyes")
+
+```
+
+*Fig: Spearman correlation of 38 MGH microdissected tumor stroma to the centroids of TCGA subtpes.  (Note stroma samples are ordered as above)*
+
+
+Note the classification by the AOCS and TCGA classifiers were similar but not identical
+
+Tumor classifications
+```{r comAOCSTCGA}
+table(birrerPredict[rownames(pt),"Predict"],pt$Predict)
+```
+
+Tumor-stroma classification
+```{r comAOCSTCGA2}
+table(birrerPredict2[rownames(st),"Predict"],st$Predict)
+```
+
+## TCGA molecular subtype classification is modified by stroma proportion 
+
+When the paired microdissected tumor and stroma tissue were computationally mixed in increasing increments of 10%, the molecular subtype assignments of the tumors changed. With 10%, 20% and 30% stroma 4/38, 10/38 and 14/38 tumors were classified to a different molecular subtype, again implying that TCGA classification is sensitive to percent stromal content.  
+
+
+
+```{r Mix_birrerPredictTCGA, warning=FALSE,fig.width=5, fig.height=3}
+mixResTCGA<-lapply(1:11, function(i) predict.tcga(((exprs(Tumors2)*Tp[i])+(exprs(Stroma2)*Sp[i])), tcga.model=tcga_scm, corThres=0.7))
+#sapply(mixResTCGA, function(x) x$Predict)
+
+## Order C1-C5 in 100% tumor
+tcgaCols<-c("gray80","gray20", "navy", "cyan")
+z<-sapply(mixResTCGA, function(x) x$Predict)
+rownames(z) =  rownames(mixResTCGA[[1]])
+
+#write.table(z, file=file.path("data", "Birrer_TCGA_prediction.txt"), sep="\t")
+
+# Convert z to numeric
+m=c("Mesenchymal","Immunoreactive","Differentiated","Proliferative")
+for(i in 1:4) z<- gsub(m[i], i,z)
+z<-data.frame(z)
+z<-data.matrix(z)
+
+ind<-order(z[,1], decreasing=TRUE)
+z<-z[ind,]
+
+
+#pdf(file=file.path(figdir, "Mix_birrer.PredictTCGA.pdf"))
+nr=nrow(z)
+nc=ncol(z)
+image(1:nc, 1:nr, t(z), col=tcgaCols, ylab="Microdissected Tumors", xlab="Proportion Tumor", xaxt="n", yaxt="n", oldstyle=TRUE)
+axis(1, 1.5:11.5, paste(Tp, sep=""), las=2,tck = 1, col = "grey", lty = "dotted")
+axis(2, 1:nr, labels=Tumors2$ShortLabel[ind], tck=0, las=2, lwd=0,cex.axis=0.7)
+
+
+legend("bottomright", legend=m, fill=tcgaCols)
+#dev.off()
+```
+* Microdissected Tumor gene expression were computationally mixed with their paired stromal gene expression profiles in increasing increments of 10%, and was classified as TCGA subtypes Mesenchymal, Immunoreactive, Differentiated or Proliferative using a SSP classifier*
+
+
+# Identifying tumor and stroma specific gene expression
+
+
+The AOCS C1 and MGH tumor-stroma gene signatures above were generated using differential gene expression analysis of microarray data. Therefore these gene signature may include genes that are expressed in both but have relatively different expression in tumor and stroma. As a result, such gene signatures are not intrinsic or highly specific markers of tumor or  tumor stroma tissue. Therefore we wished to identify tumor and stroma specific genes. Tumor specific genes would be genes that are expressed in tumor but are not expressed in stroma.   
+
+To obtain gene sets specific to tumor, tumor stroma, and normal ovarian stroma, gene expression profiles of the MGH dataset’s paired stroma and tumor (n = 38), as well as normal stroma (n = 10), were converted to binary on/off calls using barcode [@McCall2010].
+
+We selected genes with high sensitivity and specificity, defined as an area under the ROC curve [@Pepe2003] of 0.9 or greater for 
+
+1. tumor         vs.   either tumor stroma or normal stroma
+2. tumor stroma  vs.   tumor or normal stroma, 
+3. normal stroma vs    tumor 
+
+These gene signatures are available in Supplementary Table 9. 
+
+
+## Discretizing genes expression data into binary barcodes
+
+We used expression profiles of paired microdissected epithelial tumor (MGH dataset n = 38), adjacent tumor stroma (n = 38) and unrelated normal ovarian stroma (n = 10).  Gene expression data were converted to binary “off/on” (1,0) calls using the fRMA gene expression barcode approach (frma) [@McCall2010].  For each of the 54675 feature (probesets) in the 86 samples (38 tumors, 38 tumor-stroma or 10 normal-stroma cases), barcode gave a 1 or 0 indicating the gene was expressed or not.
+
+```{r barcode, warning=FALSE, message=FALSE}
+library(frma)
+#birrer_eSet_barcode<-barcode(birrer_eSet, platform="GPL570")
+#save(birrer_eSet_barcode,file=file.path(datadir, "birrer_eSet_barcode.RData"))
+load(file.path(datadir, "birrer_eSet_barcode.RData"))
+#dim(birrer_eSet_barcode)
+#birrer_eSet_barcode[1:2,1:2]
+if (!identical(sampleNames(birrer_eSet),colnames(birrer_eSet_barcode))) birrer_eSet_barcode<-birrer_eSet_barcode[,sampleNames(birrer_eSet)]
+
+```
+
+* `r sum(rowSums(birrer_eSet_barcode)==0)`  `r paste0("(", round(sum(rowSums(birrer_eSet_barcode)==0)/nrow(birrer_eSet_barcode)*100,2), "%)")` of Affymeyrix probeIDs were not expressed in any sample
+
+*  `r sum(rowSums(birrer_eSet_barcode)>0)` `r paste0("(", round(sum(rowSums(birrer_eSet_barcode)>0)/nrow(birrer_eSet_barcode)*100,2), "%)")` of Affymetrix probe IDs were expressed (barcode =1) is at least one tissue sample (tumor, tumor stroma or normal). 
+
+* There were more probeIDs expressed in Tumor Stroma, possibly reflecting the diversity of cell types in stroma.
+
+```{r aveOngenes}
+plot(colSums(birrer_eSet_barcode)~factor(birrer_eSet$sample_type), las=2, ylab="Expressed genes (barcode=1)", xlab="")
+```
+
+* Counts of expressed genes (barcode =1) is each MGH sample*
+
+Given that most probeID were not expressed and many  were rarely expressed. We excluded any probesets that was not expressed in at least 3 samples (leaving 14701 probesets).  We also excluded ubiquitously expressed probesets, probeIDs with  a 1 in all tumors (n=703) reducing the barcode dataset to 13998 probesets and 86 samples.
+ 
+```{r filterbarcode}
+## Filter genes that are not expressed.  Genes need to be expressed in 2 or more samples
+
+par(mfrow=c(1,2))
+rs<-rowSums(birrer_eSet_barcode)
+hist(rs, main="",sub= "All probesets (n= 54,675)", ylab="Number of ProbeIDs", xlab="Sample which express gene")
+
+birrer_eSet_barcode<-birrer_eSet_barcode[rs>2,]
+#dim(birrer_eSet_barcode)
+
+rs<-rowSums(birrer_eSet_barcode)
+##  Filer genes expressed by all samples
+birrer_eSet_barcode<-birrer_eSet_barcode[!rs==ncol(birrer_eSet_barcode),]
+
+rs<-rowSums(birrer_eSet_barcode)                                     
+#dim(birrer_eSet_barcode)   
+hist(rs, main="",sub="Filtered probeset (n=13998)", ylab="Number of ProbeIDs", xlab="Samples which express gene")
+
+## barcode, drops some affy ids which are in the stroma genes
+#table(SG%in%rownames(birrer_eSet_barcode))
+#table(TG%in%rownames(birrer_eSet_barcode))
+```
+
+
+After filtering, we see that tumor stroma still express more genes. 
+
+```{r aveOngenes2}
+plot(colSums(birrer_eSet_barcode)~factor(birrer_eSet$sample_type),  ylab="Expressed genes (barcode=1)", xlab="", cex.axis=0.5,las=2)
+```
+
+```{r cellines,eval=FALSE}
+#cellLines<-load("~/Projects/Ovarian/GSE29175/GSE29175.RData")
+#cellLines[fRMAAUC$ranked$all$probe_id,]
+#fRMAAUC$ranked$all$probe_id
+#cellLines[as.character(fRMAAUC$ranked$all$probe_id),]
+#fRMAAUC$ranked$all <-read.csv(file.path(wkdir, "data","fRMA_ROC_ALL.csv"), as.is=TRUE)
+```
+
+
+```{r barcodeFreqCounts, fig.keep='none'}
+#The first plot is the counts of genes that are called 1, across all 38 tumors, 38 tumor-stroma or 10 normal-stroma cases. The remainder 5 boxplots are the fraction of the 38 tumors than have the genes expressed for the AOCS tumor-stroma or MGH tumor-stroma genes.
+
+barcodeRes<-list()
+# Counts is the sum of 1,0 in each class (tumor, tumor-stroma or normal-stroma)
+barcodeRes$Counts<-t(apply(birrer_eSet_barcode, 1, function(x) tapply(x, birrer_eSet$sample_type, sum)))
+
+# Freq is the proportion of each class which express genes, 1 means 100% of tumor/tumor-stroma/normal-stroma have a 1 (expressed)
+barcodeRes$Freq<- sweep(barcodeRes$Counts, 2, as.numeric(table(birrer_eSet$sample_type)), FUN="/")
+
+barcodeRes$TGfreq<- barcodeRes$Freq[geneSig$Tumor_AffyIDs[geneSig$Tumor_AffyIDs%in%rownames(birrer_eSet_barcode)],]
+barcodeRes$SGfreq<- barcodeRes$Freq[geneSig$Stromal_AffyIDs[geneSig$Stromal_AffyIDs%in%rownames(birrer_eSet_barcode)],]
+
+barcodeRes$TG_birrerfreq<- barcodeRes$Freq[BirrerSig$Tumor_AffyIDs[BirrerSig$Tumor_AffyIDs%in%rownames(birrer_eSet_barcode)],]
+
+barcodeRes$SG_birrerfreq<- barcodeRes$Freq[BirrerSig$Stromal_AffyIDs[ BirrerSig$Stromal_AffyIDs%in%rownames(birrer_eSet_barcode)],]
+```
+
+#plot
+```{r fRMA, fig.width=6, fig.height=6}
+par(mfrow=c(3,2))
+boxplot(barcodeRes$Counts, main="All barcodes", ylab="Counts")
+boxplot(barcodeRes$Freq, main="All barcodes", ylab="Proportion ")
+
+boxplot(barcodeRes$TGfreq, main="Tumor Genes (AOCS) barcodes", ylab="Proportion ")
+
+
+boxplot(barcodeRes$TG_birrerfreq, main="Tumor Genes (MGH) barcodes", ylab="Proportion")
+
+boxplot(barcodeRes$SGfreq, main="Stroma Genes (AOCS) barcodes", ylab="Proportion ")
+
+boxplot(barcodeRes$SG_birrerfreq, main="Stroma Genes (MGH) barcodes", ylab="Proportion ")
+
+```
+
+
+## Discovery of Tumor and Tumor-Stroma Specifc Genes  (using ROC) 
+To identify those genes with greatest tissue sensitivity and specificity (area under the receiver operator curve  greater than 0.9), for Tumors, Tumor-Stroma or Normal-Stroma, we applied the Pepe et al., Biometrics 2003 ROC approach [@Pepe2003]. 
+
+We identified genes that were specific to: 
+
+*  Tumor -  Expressed in tumor but not in tumor or normal stroma
+*  Tumor Stroma  -  Expressed in tumor stroma but not in tumor or normal stroma 
+*  Normal Stroma   -  Expressed in normal stroma but not in tumor or tumor stroma 
+
+These gene signatures are available in Supplementary Table 9. 
+
+We also compared the latter two gene signatures to those of any Stroma (Tumor or Normal Stroma)  which were genes expressed in tumor stroma or normal stroma but not in tumor 
+
+
+```{r ROC_allAUC}
+tests<- list("Tumor", "Tumor_Stroma", c("Tumor_Stroma" , "Normal_Stroma"),  "Normal_Stroma")
+names(tests)= c("Tumor", "Tumor_Stroma", "Tumor+Normal_Stroma", "Normal_Stroma")
+tests<- lapply(tests, function(x)as.numeric(birrer_eSet$sample_type%in%x))
+
+if (!identical(sampleNames(birrer_eSet), colnames(birrer_eSet_barcode))) stop("Issue with sample names order")
+ 
+if (!file.exists(file=file.path(wkdir, "allAUC.RData"))){
+    ## We probably don't need to resample all genes, lets take the top 2000 from the runAUC analysis
+
+    # Run AUC Analysis
+    allAUC<-lapply(tests, function(x) {
+            AUC<- apply(birrer_eSet_barcode,1, myauc,x);
+            AUC<- AUC[order(AUC,decreasing=TRUE)]
+    	      AUCReSamp=runResampAUC(eSet=birrer_eSet[names(AUC)[1:2000],], cov=x,nResamp=50)
+            return(list(AUC=AUC, AUCReSamp=AUCReSamp))
+    	})
+
+      save(allAUC, file=file.path(wkdir, "allAUC.RData"))
+}
+```
+
+```{r}
+load( file=file.path(wkdir, "allAUC.RData"))
+
+tests<- list("Tumor", "Tumor_Stroma", c("Tumor_Stroma" , "Normal_Stroma"),  "Normal_Stroma")
+names(tests)= c("Tumor", "Tumor_Stroma", "Tumor+Normal_Stroma", "Normal_Stroma")
+tests<- lapply(tests, function(x)as.numeric(birrer_eSet$sample_type%in%x))
+
+
+ 
+allAUC$genes_ranked<-lapply(names(tests), function(x) {
+      AA<-allAUC[[x]]$AUC[order(allAUC[[x]]$AUC,decreasing=TRUE)]
+      genes= cbind(fData(birrer_eSet)[names(AA),], ROC=AA)})
+
+names(allAUC$genes_ranked) = names(tests)
+
+```
+
+
+Number of probesets with an AUC >0.9
+```{r nGenes09}
+allAUC$genes_ranked_0.9<- lapply(allAUC$genes_ranked, function(x) x[x$ROC>0.9,])
+sapply(allAUC$genes_ranked_0.9, nrow)
+```
+
+```{r histran, fig.width=9, fig.height=7}
+par(mfrow=c(2,1))
+for (i in seq_along(names(tests))) {boxplot(allAUC[[names(tests)[i]]][[2]] , main=names(tests[i]), ylim=c(0,1)); abline(h=0.5, col="red")}
+```
+
+*Histogram plots of the resampled data,  Whilst the tumor and tumor stroma comparison had similar distribution, normal stroma had higher AUC values by random chance (probably because of its low sample size n=10). For normal-stroma we use a higher AUC threshold of 0.95*
+
+
+There were 4 probes that were found in Tumor Stroma and Normal Stroma. These were excluded. For normal-stroma higher median AUC results. Furthermore randomly sampled normal-stroma data also had higher AUCs, possibly due to low sample size. Therefore an AUC of 0.95 was used for normal-stroma.
+
+```{r finalGSset}
+# Add lists to one matrix for easier analysis                                    
+x<-do.call(rbind,allAUC$genes_ranked_0.9)
+allAUC$genes_ranked_0.9$all<- cbind(x, GS=sapply(strsplit(rownames(x), "\\.") , function(x) x[1]))
+        
+table( allAUC$genes_ranked_0.9$all$GS)
+
+write.csv(allAUC$genes_ranked_0.9$all, file="fRMA_allAUC_0.9_Norm0.95.csv")
+```
+
+```{r Pepe}
+
+ind<-names(which(table(unlist(lapply(allAUC$genes_ranked_0.9,rownames)))>1))
+rmFeatures<-function(x, ind) x[!rownames(x)%in%ind,]
+
+#sapply(lapply(allAUC$genes_ranked_0.9, rmFeatures, ind), nrow)
+allAUC$genes_ranked_0.9<-lapply(allAUC$genes_ranked_0.9, rmFeatures, ind)
+print("AUC 0.9 threshold")
+sapply(allAUC$genes_ranked_0.9, nrow)
+
+x3<-allAUC$genes_ranked_0.9$all[allAUC$genes_ranked_0.9$all$GS%in%c("Tumor", "Normal_Stroma", "Tumor_Stroma"),]
+
+x3$Tissue=reshape2::colsplit(rownames(x3), pattern="\\." ,c("Tissue", "probes"))[,1]
+table(x3$Tissue)
+```
+```{r}
+head(x3)
+```
+
+### Plot of Tumor specific Genes 
+```{r plotX3b, fig.height=8, fig.width=8}
+
+library(magrittr)
+x3p <- x3 %>% subset(.,Tissue=="Tumor")
+par(mfrow=c(4,4))
+for (i in seq_along(1:nrow(x3p)))
+  {plot(exprs(birrer_eSet)[x3p$probe_id[i],]~ factor(birrer_eSet$sample_type), main=ifelse(is.na(x3p$symbol[i]),paste(x3p$GS[i],":",x3p$probe_id[i]),paste(x3p$GS[i],":",x3p$symbol[i], " ", round(x3p$ROC[i],2))), ylab="expression",  las=2, xlab="", names=c("T", "TS", "TN"), col=c("yellow", "green4", "navy"),
+    ylim=c(3,11))
+  abline(h=log2(100), col="red", lty="dotdash")
+}
+```
+### Plot of Tumor-Stroma specific Genes 
+```{r plotX3, fig.height=8, fig.width=8}
+
+library(magrittr)
+x3p <- x3 %>% subset(.,Tissue=="Tumor_Stroma")
+par(mfrow=c(4,4))
+for (i in seq_along(1:nrow(x3p)))
+  {plot(exprs(birrer_eSet)[x3p$probe_id[i],]~ factor(birrer_eSet$sample_type), main=ifelse(is.na(x3p$symbol[i]),paste(x3p$GS[i],":",x3p$probe_id[i]),paste(x3p$GS[i],":",x3p$symbol[i], " ", round(x3p$ROC[i],2))), ylab="expression",  las=2, xlab="", names=c("T", "TS", "TN"), col=c("yellow", "green4", "navy"),
+    ylim=c(3,11))
+  abline(h=log2(100), col="red", lty="dotdash")
+}
+```
+
+```{r}
+allAUC$genes_ranked_0.9[3:4]<-lapply(allAUC$genes_ranked_0.9[3:4], function(x) x[x$ROC>0.95,])
+print("Number Probe IDs that Pass AUC 0.9 or 0.95 threshold")
+sapply(allAUC$genes_ranked_0.9, nrow)
+```
+
+
+
+
+
+I plot a heatmap of the actual expression values of the genes in the comparisons "Tumor specific", "Tumor Stroma specific", "Normal Stroma specific". For comparison, we include the list of genes expressed in either "Tumor stroma or Normal Stroma" but this is excluded in subsequent analysis
+
+Tumor specific genes were those expressed in tumor but not tumor stroma or normal stroma. We identified 28 tumor-specific genes, 11 tumor stroma and there were 38 or 20 normal stroma genes with an AUC greater than 0.9 or 0.95 respectively.  The tumor-specific genes included ERBB3, ESRP1, FXYD3 and TPD52 (Supplementary Table 9). 
+
+
+
+## Tumor and Stroma specific gene signature (barcode) MGH data
+```{r frmabirrerROC_filter09}
+                                     
+#par(mfrow=c(2,1), cex=0.8)
+#venn(lapply(allAUC$genes_ranked_0.9, function(x) as.character(x$probe_id)))
+#title(main="Overlap of Affymetrix ProbeID", cex.main=1)
+#venn(lapply(allAUC$genes_ranked_0.9, function(x) {x<-as.character(x$symbol); x[!is.na(x)]}))
+#title(main="Overlap of Gene Symbols", cex.main=1)
+# par(cex=1)
+
+print("Number of genes (ProbeIDs) for each class")
+tapply(allAUC$genes_ranked_0.9$all$probe_id,allAUC$genes_ranked_0.9$all$GS, function(x) length(unique(x)))
+
+print("Number of genes (Gene Symbols) for each class")
+tapply(allAUC$genes_ranked_0.9$all$symbol,allAUC$genes_ranked_0.9$all$GS, function(x) length(unique(x[!is.na(x)])))
+
+x3<-allAUC$genes_ranked_0.9$all
+x3$Tissue=reshape2::colsplit(rownames(x3), pattern="\\." ,c("Tissue", "probes"))[,1]
+#table(x3$Tissue)
+x3<-x3[!x3$Tissue%in%"Tumor+Normal_Stroma",]
+x3$Tissue<-factor(x3$Tissue, levels=levels(birrer_eSet$sample_type))
+head(x3)
+```
+
+
+
+```{r}
+#library(AnnotationDbi)
+#library(hgu133plus2.db)
+#select(hgu133plus2.db, columns = c("PROBEID"  ,"SYMBOL"),keys = x3$probe_id, keytype = "PROBEID")
+
+require("biomaRt")
+mart <- useMart("ENSEMBL_MART_ENSEMBL")
+mart <- useDataset("hsapiens_gene_ensembl", mart)
+annX3<-getBM(mart=mart,
+  attributes=c("affy_hg_u133_plus_2","ensembl_gene_id", "gene_biotype", "external_gene_name", "chromosome_name", "strand", "band", "start_position", "end_position"),
+  filter="affy_hg_u133_plus_2",
+  values=x3$probe_id,
+  uniqueRows=TRUE)
+x3<-merge(x3, annX3, by.x="probe_id", by.y="affy_hg_u133_plus_2" , all.x=TRUE)
+write.csv(x3,"x3.csv" )
+x3<-read.csv("x3.csv", as.is=TRUE)
+```
+
+```{r}
+
+ind<-!c(c(x3$GS=="Normal_Stroma" & x3$ROC<0.95)|is.na(x3$symbol)| x3$ROC<0.91)
+
+heatplot(cor(t(exprs(birrer_eSet[x3$probe_id[ind],]))), scale="none", dualScale=FALSE,labRow=x3$symbol[ind], classvec=factor(x3$GS[ind]), classvecCol = c("navy", "yellow", "green4"))
+        
+legend("topleft",legend=c("Tumor", "Tumor_Stroma", "Normal_Stroma"), fill=c("yellow", "green4", "navy"), cex = 0.7)
+```
+
+
+## Correlation between probeids
+* Heatmap showing the hierarchical cluster analysis of the gene expression of genes specific to tumor, tumor stroma and normal stroma in the MGH dataset. Tumor specific genes has a strong correlation.  There was cross-correlation between tumor stroma (green) and Normal stroma genes (navy)* 
+
+```{r hecor}
+
+heatplot(cor(t(exprs(birrer_eSet[x3$probe_id,]))), scale="none", dualScale=FALSE, classvec=factor(x3$Tissue,levels=c("Tumor", "Tumor_Stroma", "Normal_Stroma")), labCol=x3$probe_id, labRow=x3$symbol,classvecCol = c( "yellow", "green4","navy"), margins=c(5,10))
+        
+legend("topleft",legend=c("Tumor", "Tumor_Stroma", "Normal_Stroma"), fill=c("yellow", "green4", "navy"), cex = 0.5)
+```
+
+* Heatmap showing the hierarchical cluster analysis of the correlation of tumor, tumor stroma and normal stroma in the MGH dataset. There was a strong within Tumor correlation.  * 
+
+```{r ssHeat2, eval=FALSE}
+xt1<-x3[!c(x3$GS=="Normal_Stroma" & x3$ROC<0.965),]
+boxplot(xt1$ROC~xt1$GS)
+xt1<-xt1[xt1$ROC>0.91,]
+heatplot(birrer_eSet[xt1$probe_id,], scale="none", dualScale=FALSE, classvec=birrer_eSet$sample_type, classvecCol=c("yellow", "green4", "navy"),labRow=paste(xt1$probe_id," ",xt1$symbol), classvec2=factor(xt1$Tissue),classvec2Col = c("yellow", "green4", "navy"), margins=c(5,10), labCol="")
+
+legend("bottomleft",legend=paste0(levels(factor(xt1$Tissue))," n=",table(factor(xt1$Tissue))),fill=c("yellow", "green4", "navy"), cex = 0.7)
+
+
+```
+
+* Heatmap showing the hierarchical cluster analysis of the gene expression of genes specific to tumor, tumor stroma and normal stroma in the MGH dataset* 
+
+
+
+```{r ConfuMatApproach}
+require(pROC)
+if (!file.exists(barcodefile)) {
+      ## Calculate Accuracy, Sensitivty and Specificity of each
+      barcodeRes<-lapply(tests, function(i) data.frame(t(apply(birrer_eSet_barcode,1, function(x) c(confusionMatrix(x,i)$overall, confusionMatrix(x,i)$byClass)))))
+      
+      for (i in names(barcodeRes)) barcodeRes[[i]]<- cbind(barcodeRes[[i]][names(allAUC[[i]]$AUC),], AUC=allAUC[[i]]$AUC)
+      
+      # The AUC calls from ROC are the same as the Balanced.Accuracy 
+      #for (i in names(barcodeRes)) print(identical(round(barcodeRes[[i]]$Balanced.Accuracy,6) ,round(barcodeRes[[i]]$AUC,6)))  ## TRUE
+      
+      save(barcodeRes, file=barcodefile)
+}
+
+# Using unequal weights, rather than 0.9 AUC, looks at distrub of sens/spec
+load(barcodefile)
+rr<-seq(0.7, 1, 0.01)
+x<-matrix(NA, nrow=length(rr), ncol=5)
+
+for (i in seq_along(rr)) x[i,]<-c(thres=rr[i], sapply(barcodeRes, function(x) sum(x$Sensitivity>=rr[i] & x$Specificity>=rr[i] & x$Balanced.Accuracy>rr[i])))
+colnames(x) = c("Thres", names(tests))
+
+plot(x[,1], x[,2], ylim=range(x), xlab="thres", ylab="Number of probesets", type ="n", main="Sensitivity, Specificity and Balanced.Accuracy over thres")
+for (i in seq_along(names(tests))) points(x[,1], x[,names(tests)[i]], col=i, pch=19)
+legend("topright", fill=1:4, legend=names(tests))
+
+abline(h=10, col="magenta", lty=2)
+text(0.75,15, "10 Probesets", col="magenta")
+
+abline(h=25, col="cyan", lty=2)
+text(0.75,30, "25 Probesets", col="cyan")
+
+
+abline(h=50, col="gray3", lty=2)
+text(0.75,55, "25 Probesets", col="gray3")
+
+
+ss=1
+x<-rownames(barcodeRes[[ss]][order(barcodeRes[[ss]]$Specificity,decreasing=TRUE),][1:10,])
+
+
+t(sapply(x, function(i)
+         tapply(birrer_eSet_barcode[i,], birrer_eSet$sample_type, sum)
+         )
+  )
+```
+
+```{r}
+pROC::plot.roc(birrer_eSet$sample_type,birrer_eSet_barcode[x[1],])
+
+#for (i in 2:10)plot.roc(birrer_eSet$sample_type,birrer_eSet_barcode[x[i],], add=TRUE,col=i)
+
+#legend("bottomright", legend=x, fill=1:10, cex=0.5)
+
+x<-rownames(barcodeRes$Tumor_Stroma[order(barcodeRes$Tumor_Stroma$Specificity,barcodeRes$Tumor_Stroma$Specificity,decreasing=TRUE),][1:10,])
+
+# t(sapply(x, function(i) tapply(birrer_eSet_barcode[i,],birrer_eSet$sample_type, sum)))
+# plot.roc(birrer_eSet$sample_type,birrer_eSet_barcode[x[1],])
+# for (i in 2:10)plot.roc(birrer_eSet$sample_type,birrer_eSet_barcode[x[i],], add=TRUE,col=i)
+# info<-paste(x,fData(birrer_eSet)[x,"symbol"],round(barcodeRes$Tumor[x,"AUC"],3) )
+# legend("bottomright", legend=info, fill=1:10, cex=0.5)
+
+
+
+classSums<-data.frame(t(sapply(rownames(birrer_eSet_barcode), function(i) tapply(birrer_eSet_barcode[i,],birrer_eSet$sample_type, sum))))
+
+x<-classSums[rownames(barcodeRes$Tumor[barcodeRes$Tumor$AUC>0.85,]),]
+x<-rownames(x[x$Tumor_Stroma<2&x$Normal_Stroma<2,])
+
+names(tests)
+filOrder<-function(x,i=1,thres=2){
+  Othercols= c(1:ncol(x))[-i]
+  ind<-order(x[])
+}
+  
+#classSums[classSums[,2]<2&classSums[,3]<2,]
+#xx<-t(sapply(rownames(birrer_eSet_barcode), function(i) tapply(birrer_eSet_barcode[i,],birrer_eSet$sample_type, sum)))
+
+
+
+```
+
+
+
+## Tumor-Stroma specific genes in TCGA data
+
+The expression of these tumor and stroma specific genes were examined in the TCGA data for which we have percent stroma, tumor and normal cell as estimated by central pathology.
+
+```{r moreR}
+## Compare to TCGA
+## Just look at Tumor, Stroma, Normal lists
+
+                               
+#comparelists(featureNames(TCGA_eset), unique(x$symbol))
+
+allAUC$genes_ranked_0.9$TCGA<-x3[x3$symbol%in%featureNames(TCGA_eset),]  
+allAUC$genes_ranked_0.9$TCGA$GS<-as.character(allAUC$genes_ranked_0.9$TCGA$GS)
+# lost many genes 
+table( allAUC$genes_ranked_0.9$TCGA$GS)
+table(cut(as.numeric(TCGA_eset$percent_tumor_cells), c(0,75,80,85,90,100)))
+x<-TCGA_eset$percent_tumor_cells
+pData(TCGA_eset)$percent_tumor_fac<-cut(TCGA_eset$percent_tumor_cells, c(0,70,80,90,100), labels=c("under 70 %","70 %", "80 %", "90 %")) 
+
+
+par(mfrow=c(1,3))
+tapply( allAUC$genes_ranked_0.9$TCGA$symbol, factor(allAUC$genes_ranked_0.9$TCGA$GS), function(x) plot(colMeans(exprs(TCGA_eset[x,order(TCGA_eset$percent_tumor_fac)]))~factor(TCGA_eset$percent_tumor_fac[order(TCGA_eset$percent_tumor_fac)]), ylab="Gene Expression", xlab="%Tumor", main=paste0(length(x), " genes"), ylim=c(4.5, 8.0)))
+
+
+tapply( allAUC$genes_ranked_0.9$TCGA$symbol, factor(allAUC$genes_ranked_0.9$TCGA$GS), function(x) {meanExprs=colMeans(exprs(TCGA_eset[x,order(TCGA_eset$percent_tumor_fac)])); TumorProp=factor(TCGA_eset$percent_tumor_fac[order(TCGA_eset$percent_tumor_fac)]); summary(lm(meanExprs~TumorProp))})
+```
+
+Figure: boxplot of mean gene expression of the A) normal stroma (37 genes) Tumor (24 genes) and C) Tumor Stroma (8 genes) and the % tumor proportion in TCGA tumors (under 70%, 70-80%, 80-90%, and over 90%). 
+
+There appears to be weak signal for normal_stroma genes in the TCGA tumor, however the mean expression levels are very low, indicating these genes are not expressed or are expressed in very few cells. The normal stroma samples are from Ovarian Surface Epithelial (OSE), and the these may not be found in serous tumors.  The 24 tumor genes has consistent mean gene expression over TCGA tumors.  However there was a negative correlation between percent tumor proportion and tumor stroma gene expression. 
+
+
+```{r boxstroma}
+x<-TCGA_eset$percent_stromal_cells
+pData(TCGA_eset)$percent_stromal_fac<-cut(x, c(0, 10,20,30,100), labels=c("under 10 %","20 %", "30 %", "over 30 %")) 
+par(mfrow=c(1,3))
+tapply( allAUC$genes_ranked_0.9$TCGA$symbol, factor(allAUC$genes_ranked_0.9$TCGA$GS), function(x) plot(colMeans(exprs(TCGA_eset[x,order(TCGA_eset$percent_stromal_fac)]))~factor(TCGA_eset$percent_stromal_fac[order(TCGA_eset$percent_stromal_fac)]), ylab="Gene Expression", xlab="% Stromal Cells", main=paste0(length(x), " genes"), ylim=c(4.5, 8.0)))
+
+tapply( allAUC$genes_ranked_0.9$TCGA$symbol, factor(allAUC$genes_ranked_0.9$TCGA$GS), function(x) {meanExprs=colMeans(exprs(TCGA_eset[x,order(TCGA_eset$percent_stromal_fac)])); StromalProp=factor(TCGA_eset$percent_stromal_fac[order(TCGA_eset$percent_stromal_fac)]); summary(lm(meanExprs~StromalProp))})
+```
+
+
+Figure: boxplot of mean gene expression of the A) normal stroma (37 genes) Tumor (24 genes) and C) Tumor Stroma (8 genes) and the % stromal cell proportion in TCGA tumors (under 10%, 10-20%, 20-30%, over 30%)) 
+
+The 24 tumor genes tended to have lower mean gene expression in tumors with higher % stroma content.  There was a clear positive  correlation between percent stroma proportion and tumor_stroma gene expression. 
+
+
+
+```{r boxnormal_prep2}
+x<-TCGA_eset$percent_normal_cells
+pData(TCGA_eset)$percent_normal_fac<-cut(x, c(0, 5,10,15,100), labels=c("under 5 %","10 %", "15 %", "over 15 %")) 
+par(mfrow=c(1,3))
+tapply( allAUC$genes_ranked_0.9$TCGA$symbol, factor(allAUC$genes_ranked_0.9$TCGA$GS), function(x) plot(colMeans(exprs(TCGA_eset[x,order(TCGA_eset$percent_normal_fac)]))~factor(TCGA_eset$percent_normal_fac[order(TCGA_eset$percent_normal_fac)]), ylab="Gene Expression", xlab="% Normal Cells", main=paste0(length(x), " genes"), ylim=c(4.5, 8.0)))
+
+tapply( allAUC$genes_ranked_0.9$TCGA$symbol, factor(allAUC$genes_ranked_0.9$TCGA$GS), function(x) {meanExprs=colMeans(exprs(TCGA_eset[x,order(TCGA_eset$percent_normal_fac)])); normalProp=factor(TCGA_eset$percent_normal_fac[order(TCGA_eset$percent_normal_fac)]); summary(lm(meanExprs~normalProp))})
+```
+
+Figure: boxplot of mean gene expression of the A) normal stroma (37 genes) Tumor (24 genes) and C) Tumor Stroma (8 genes) and the % normal cell proportion in TCGA tumors (under 5%, 5-10%, 10-15%, over 15%)) 
+
+## Path assoc with Gene Sets
+
+### Gene Sets associated with Percent Normal Cells
+There was no association between the expression of any gene signature and percent normal cell proportion in TCGA data.
+
+```{r boxnormal_2}
+print("******** % NORMAL CELLS *********")
+
+tt<-lapply (levels(x3$Tissue), function(i) {
+  ind<-x3$symbol[x3$Tissue%in%i]
+  return(lm(colMeans(exprs(TCGA_eset[featureNames(TCGA_eset)%in%ind,]))~TCGA_eset$percent_normal_fac))
+  })
+names(tt)= levels(x3$Tissue)
+lapply(tt,summary)
+
+```
+
+### Gene Sets associated with Percent Tumor Cells
+
+```{r boxTumor}
+print("******** % TUMOR CELLS *********")
+tt<-lapply (levels(x3$Tissue), function(i) {
+  ind<-x3$symbol[x3$Tissue%in%i]
+  return(lm(colMeans(exprs(TCGA_eset[featureNames(TCGA_eset)%in%ind,]))~TCGA_eset$percent_tumor_fac))
+  })
+names(tt)= levels(x3$Tissue)
+lapply(tt,summary)
+
+```
+
+### Gene Sets associated with Percent Stroma Cells
+
+```{r boxStroma}
+print("******** % STROMA CELLS *********")
+tt<-lapply (levels(x3$Tissue), function(i) {
+  ind<-x3$symbol[x3$Tissue%in%i]
+  return(lm(colMeans(exprs(TCGA_eset[featureNames(TCGA_eset)%in%ind,]))~TCGA_eset$percent_stromal_fac))
+  })
+names(tt)= levels(x3$Tissue)
+lapply(tt,summary)
+
+```
+
+### Gene Sets associated with DeBulking
+
+```{r boxnormalprep}
+tt<-lapply (levels(x3$Tissue), function(i) {
+  ind<-x3$symbol[x3$Tissue%in%i]
+  lm(colMeans(exprs(TCGA_eset[featureNames(TCGA_eset)%in%ind,]))~TCGA_eset$debulking)
+  })
+names(tt)= levels(x3$Tissue)
+res=lapply(tt,broom::tidy)
+res=cbind(factor=levels(x3$Tissue),do.call(rbind,res)[c(2,4,6),])
+res
+```
+
+```{r }
+
+syms<-allAUC$genes_ranked_0.9$TCGA$symbol                                      
+AUC_TCGA_Cor<-esApply(TCGA_eset[syms,], 1, function(x) c(cor(x,TCGA_eset$percent_stromal_cells,use="pairwise.complete.obs"), 
+cor(x,TCGA_eset$percent_tumor_cells, use="pairwise.complete.obs"),
+cor(x,TCGA_eset$percent_normal_cells, use="pairwise.complete.obs")))
+rownames(AUC_TCGA_Cor) = c("Stroma", "Tumor", "Normal")
+
+                                       
+allAUC$genes_ranked_0.9$TCGA<-cbind(allAUC$genes_ranked_0.9$TCGA,t(AUC_TCGA_Cor))       
+
+
+
+#plot(AUC_TCGA_Cor[2,], AUC_TCGA_Cor[1,], col=as.character(factor(allAUC$genes_ranked_0.9$TCGA$GS, labels=1:3)), pch=19, ylim=c(-.3,.4), xlim=c(-.3,.4))
+#boxplot(t(AUC_TCGA_Cor), cex.axis=0.7)                                       
+
+#pairs(fRMAROC_TCGA_Cor)
+pairs(t(AUC_TCGA_Cor),pch=as.character(factor(allAUC$genes_ranked_0.9$TCGA$GS, labels=c("T","S","N"))), col=as.character(factor(allAUC$genes_ranked_0.9$TCGA$GS, labels=1:3)))
+
+save(allAUC, file="allAUC.RData")
+```
+
+
+
+
+##Train a svm to predict score and test TCGA tumors  (could use deMix??)
+ 
+A classifier was built using a support vector machine with linear kernel (method svmLinear in R package caret) and leave one out cross validation, which was used to predict the tumors with higher percent stroma in TCGA tumor gene expression profiles.
+
+```{r fRMAROC_classifier, eval=FALSE}
+load('allAUC.RData')                                         
+library(caret)
+                                         
+## train
+svm<- train(t(exprs(birrer_eSet[allAUC$genes_ranked_0.9$all$probe_id,])), birrer_eSet$sample_type,method="svmLinear",trControl=trainControl(method="LOOCV")) 
+
+knnFit<-train(t(exprs(birrer_eSet[allAUC$genes_ranked_0.9$all$probe_id,])), birrer_eSet$sample_type,method="knn",trControl=trainControl(method="cv")) 
+         
+                                
+## Predict
+                                         
+aocs_predict<-predict(svm, newdata=t(exprs(aocs_eSet[allAUC$genes_ranked_0.9$all$probe_id,])), type="raw")
+table(aocs_predict)                                         
+table(aocs_predict, aocs_eSet$k.means.Group)
+table(aocs_predict, aocs_eSet$Arrayed.Site)
+#table(aocs_predict, aocs_eSet$k.means.Group, aocs_eSet$Arrayed.Site)
+aocs_predict<-predict(knnFit, newdata=t(exprs(aocs_eSet[allAUC$genes_ranked_0.9$all$probe_id,])), type="raw")                                         
+knn3res<-knn3Train(train=t(exprs(birrer_eSet[allAUC$genes_ranked_0.9$all$probe_id,])), test=t(exprs(aocs_eSet[allAUC$genes_ranked_0.9$all$probe_id,])), cl=birrer_eSet$sample_type, k=5, l=0, prob = TRUE, use.all=TRUE)
+                                         
+                                         
+## Apply to TCGA.. need to reduce probesets
+allAUC$genes_ranked_0.9$TCGA$symbol
+allAUC$genes_ranked_0.9$TCGA[allAUC$genes_ranked_0.9$TCGA$symbol%in%allAUC$genes_ranked_0.9$TCGA$symbol[duplicated(allAUC$genes_ranked_0.9$TCGA$symbol)],]
+# Drop one with smaller ROC
+dups<-allAUC$genes_ranked_0.9$TCGA$symbol[duplicated(allAUC$genes_ranked_0.9$TCGA$symbol)]
+dupsExclude<-sapply(dups, function(x) {
+   a<-allAUC$genes_ranked_0.9$TCGA[allAUC$genes_ranked_0.9$TCGA$symbol%in%x,]
+   n<-which.min(allAUC$genes_ranked_0.9$TCGA[allAUC$genes_ranked_0.9$TCGA$symbol%in%x,"ROC"])
+   a[n,"probe_id"] }
+   )
+allAUC$genes_ranked_0.9$TCGA2<-allAUC$genes_ranked_0.9$TCGA[!allAUC$genes_ranked_0.9$TCGA$probe_id%in%dupsExclude,]
+                                         
+sum(duplicated(allAUC$genes_ranked_0.9$TCGA2$symbol))
+                                         
+birrer_eSet$class<-factor(birrer_eSet$sample_type, labels=c("N", "S", "T"))
+                                         
+svmFit2<-train(t(exprs(birrer_eSet[allAUC$genes_ranked_0.9$TCGA2$probe_id,])), birrer_eSet$class,method="svmLinear",trControl=trainControl(method="repeatedcv", repeats=5)) 
+         
+                                
+## Predict
+                                         
+tcga_predict<-predict(svmFit2,newdata=t(exprs(TCGA_eset[allAUC$genes_ranked_0.9$TCGA2$symbol])), type="prob")
+colSums(tcga_predict>0)
+tcga_predict[1:10,]
+                                        
+save(tcga_predict, file="tcga_predict.RData")
+pairs(cbind( tcga_predict, percent_tumor=TCGA_eset$percent_tumor_cells, percent_stromal=TCGA_eset$percent_stromal_cells, percent_normal=TCGA_eset$percent_normal_cells))
+  
+summary(lm(percent_tumor~1+T+S+N, data=cbind( tcga_predict, percent_tumor=TCGA_eset$percent_tumor_cells, percent_stromal=TCGA_eset$percent_stromal_cells, percent_normal=TCGA_eset$percent_normal_cells)))
+                                         
+summary(lm(percent_stromal~1+T+S+N, data=cbind( tcga_predict, percent_tumor=TCGA_eset$percent_tumor_cells, percent_stromal=TCGA_eset$percent_stromal_cells, percent_normal=TCGA_eset$percent_normal_cells)))
+summary(lm(percent_normal~1+S+N+T, data=cbind( tcga_predict, percent_tumor=TCGA_eset$percent_tumor_cells, percent_stromal=TCGA_eset$percent_stromal_cells, percent_normal=TCGA_eset$percent_normal_cells)))
+
+                                         
+plotRel<-function(x=tcga_predict$T,y=TCGA_eset$percent_stromal_cells, ylab="Quantiles", xlab="Predict", ...) {
+    boxplot(x ~cut(y,quantile(y, na.rm=TRUE)), xlab=xlab, ylab=ylab,...)                                         
+}                                     
+
+par(mfrow=c(1,2))
+plotRel(tcga_predict$T, TCGA_eset$percent_tumor_cells, ylab="Predicted Tumor", xlab="Quantiles % tumor cells (TCGA)")
+plotRel(tcga_predict$T, TCGA_eset$percent_stromal_cells, ylab="Predicted Tumor", xlab="Quantiles % stromal cells(TCGA)")
+                                         
+par(mfrow=c(1,2))
+plotRel(tcga_predict$S, TCGA_eset$percent_tumor_cells, ylab="Predicted Stroma", xlab="Quantiles % tumor cells (TCGA)")
+plotRel(tcga_predict$S, TCGA_eset$percent_stromal_cells, ylab="Predicted Stroma", xlab="Quantiles % stromal cells(TCGA)")
+                                         
+par(mfrow=c(1,2))
+plotRel(tcga_predict$N, TCGA_eset$percent_tumor_cells, ylab="Predicted Normal", xlab="Quantiles % tumor cells (TCGA)")
+plotRel(tcga_predict$N, TCGA_eset$percent_stromal_cells, ylab="Predicted Normal", xlab="Quantiles % stromal cells(TCGA)")
+                                         
+### FIGURE
+par(mfrow=c(1,2))
+plotRel(tcga_predict$T, TCGA_eset$percent_tumor_cells, ylab="Probability Tumor", xlab="Quantiles % tumor cells (TCGA)", cex.axis=0.8)
+plotRel(tcga_predict$S, TCGA_eset$percent_stromal_cells, ylab="Probability Stroma", xlab="Quantiles % stromal cells(TCGA)", cex.axis=0.8)
+
+#knn3resTCGA<-knn3Train(train=t(exprs(birrer_eSet[allAUC$genes_ranked_0.9$TCGA2$probe_id,])), test=t(exprs(TCGA_eset[allAUC$genes_ranked_0.9$TCGA2$symbol])), cl=birrer_eSet$sample_type, k=10, l=1, prob = TRUE, use.all=TRUE)
+#table(knn3resTCGA[1:ncol(TCGA_eset)])
+
+#knn3resTCGA[1:10]
+#attr(knn3resTCGA,"prob")[1:10,]
+                                      
+
+## see function plotClassProbs and extractProbs,
+```
+
+
+```{r cellMix, warning=FALSE}
+require(CellMix)
+#cellMarkersInfo()
+#mix<-aocs_eSet[unlist(sapply(allAUC$genes_ranked_0.9[c(1:2,4)], rownames)),]
+birrer_eSet$sample_type<-toupper( birrer_eSet$sample_type)
+
+gedEst<-function(markerGenes, markerSym, pp=TRUE,...) {
+    require(CellMix)
+    require(NMF)
+    # Estimate the predicte proportions
+    mix<-exprs(birrer_eSet[markerGenes,])
+    pure<-t(apply(mix, 1, function(x) tapply(x, birrer_eSet$sample_type, mean)))
+    res<-gedProportions(mix, pure)
+    if(pp)basismarkermap(pure, res, main=paste0("MGH dataset (genes n=", length(markerGenes), ")"))
+    
+    # Estimate prediction proportions in TCGA
+    markerSym= markerSym[markerSym%in%featureNames(TCGA_eset)& markerSym%in%fData(birrer_eSet)$symbol]
+    
+    ## TCGA ged
+    gg<-fData(birrer_eSet)[fData(birrer_eSet)$symbol%in%markerSym, ]
+    # Summarize by symbols
+    pure<-apply(exprs(birrer_eSet[gg$probe_id,]),2, function(x)tapply(x,gg$symbol, mean ))
+    pure<-t(apply(pure, 1, function(x) tapply(x, birrer_eSet$sample_type, mean)))
+    
+    mix<-exprs(TCGA_eset[rownames(pure),])
+    resTCGA<-gedProportions(mix, pure)
+    if(pp) basismarkermap(pure, resTCGA, main=paste0("TCGA dataset (genes n=", length(markerSym), ")"))
+
+    #markermap(pure, res)
+    return(list(resMGH=res, resTCGA=resTCGA))
+}
+```
+
+```{r MGHP}
+# Make matrix of 1,0 for each tumor/stoma/normal of "proportions"
+MGH_Proportions<-sapply(levels(factor(birrer_eSet$sample_type)), function(x) (birrer_eSet$sample_type%in%x))
+rownames(MGH_Proportions) = sampleNames(birrer_eSet)
+colnames(MGH_Proportions) = levels(factor(birrer_eSet$sample_type))
+MGH_Proportions= t(MGH_Proportions)*1
+
+TCGA_Proportions=t(pData(TCGA_eset)[,c("percent_normal_cells","percent_tumor_cells", "percent_stromal_cells")])
+TCGA_Proportions[is.na(TCGA_Proportions)]<-0
+rownames(TCGA_Proportions)=levels(factor(birrer_eSet$sample_type))
+summary(t(TCGA_Proportions))
+```
+
+# Select markers using ged
+
+
+# First set of markers
+```{r getEst1}
+library(CellMix)
+mG=allAUC$genes_ranked_0.9$all$probe_id
+names(mG) =allAUC$genes_ranked_0.9$all$GS
+#mG<-MarkerList(mG)
+mS=allAUC$genes_ranked_0.9$all$symbol
+names(mS) =allAUC$genes_ranked_0.9$all$GS
+mS<-mS[!is.na(mS)]
+#mS<-MarkerList(mS)
+allAUC$gedEst<-gedEst(markerGenes=unique(mG),markerSym=unique(mS))
+
+
+# unscaled proportions
+#summary(colSums(coef(allAUC$gedEst$resTCGA)))
+# rescaled proportions (sum up to one)
+#summary(colSums(scoef(allAUC$gedEst$resTCGA)))
+
+profplot(MGH_Proportions, NMF:::coef(allAUC$gedEst$resMGH), ylab="predicted proportion", Colv=2)  
+profplot(TCGA_Proportions, NMF:::coef(allAUC$gedEst$resTCGA), ylab="predicted proportion")  
+```
+
+```{r gedDSL}
+mG<-mG[names(mG)%in%c("Tumor", "Tumor_Stroma", "Normal_Stroma")]
+mS<-mS[names(mS)%in%c("Tumor", "Tumor_Stroma", "Normal_Stroma")]
+xDSL<-ged(TCGA_eset,MarkerList(mS))
+profplot(TCGA_Proportions, NMF:::coef(xDSL), ylab="predicted proportion", Colv=2)
+xDSL<-ged(birrer_eSet,MarkerList(mG))
+profplot(MGH_Proportions, NMF:::coef(xDSL), ylab="predicted proportion", Colv=2)
+```
+
+```{r}
+# Get marker genes
+xcsSAM<-ged(birrer_eSet, MGH_Proportions, method="csSAM",nperms = 200, standardize = TRUE, medianCenter = TRUE, logRm = FALSE, logBase = 2,   nonNeg = TRUE)
+
+save(xcsSAM, file=file.path(wkdir,"xcsSAM.RData"))
+#heatplot(birrer_eSet[flatten(csTopTable(basis(xcsSAM))),], classvec=birrer_eSet$sample_type)
+
+```
+
+
+# Suppl 9 
+```{r getEst2, cache=FALSE}
+require(CellMix)
+mG2=supplTabs[[9]][-1,]$Affymetrix
+mS2= supplTabs[[9]][-1,]$"HGNC official gene symbol"
+mS2<-mS2[!is.na(mS2)]
+suppl9_gedEst<-gedEst(mG2,mS2)
+
+profplot(MGH_Proportions, NMF:::coef(suppl9_gedEst$resMGH),ylab="predicted", add=FALSE) 
+
+rownames(TCGA_Proportions) <-rownames(NMF:::coef(suppl9_gedEst$resTCGA))<- toupper(rownames(NMF:::coef(suppl9_gedEst$resTCGA)))
+
+profplot(x=TCGA_Proportions, y=NMF:::coef(suppl9_gedEst$resTCGA), ylab="Predicted Proportion", scale="none", colV=order(TCGA_Proportions[3,]), xlab="Pathologists percent cells in TCGA Tumors") 
+```
+
+
+# Analysis of gene signatures
+In order to use gene signatures as single covariates for statistical analysis, the expression values of all genes in a signature were combined into a single value per sample, using a weighted sum as previously described (gene expression grade index [@Sotiriou2006]). This weighted sum defines a “score” for a signature, in which positive weights (+1) were applied to genes up-regulated in poor prognosis tumors, BRCA mutation-like tumors, metastases, an angiogenic subtype, or malignant tumors, and negative weights (-1) were applied to the other genes in the signature. When analyzing overlap between gene sets, we tested for association using Fisher’s exact test, where the background number of genes was equal to the number of genes in the AOCS dataset’s platform (n = 18,769). Cox proportional hazards regression was used to test for association between continuous variables and survival variables, including relapse-free survival (RFS) and overall survival (OS). Simple linear regression was used to test for association between continuous variables and percent stromal content. When using gene signature scores in survival analyses and analyses to validate association with stromal content or survival in independent datasets, no multiple testing correction was used. We did not apply a multiple testing correction because the purpose of our analysis was to study the gene signatures as they could have been analyzed in their originl papers. We did not want to punish p-values for association with, say, survival simply with the context of studying several signatures simultaneously. In other instances, such as genome-wide differential expression, multiple testing correction was appropriate.
+
+
+# Survival analysis of curated ovarian cancer data
+The prognostic power of the tumor and stroma gene signatures were assessed for concordance of risk scores with overall patient survival. We did this using Uno’s version of the Concordance Index (or C-Index) and eight published gene expression datasets available within the curatedOvarianData package in Bioconductor 13. The C-Index is interpretable as the probability that a patient predicted to be at lower risk than another patient will survive longer than that patient: its expected value is 0.5 for random predictions, and 1 for a perfect risk model.  
+
+
+```{r, cache=FALSE, warning=FALSE, results="hide", message=FALSE}
+library(curatedOvarianData)
+library(gdata)
+library(affy)
+library(metafor)
+library(xtable)
+library(survival)
+x <-procReadSig(file.path(datadir,"Schwede_SupplTable 1 -TumorStromalGenes.csv"))
+names(x)<-gsub(" ", "\\.", names(x))
+```
+
+
+Create a list of ExpressionSets from curatedOvarianData:
+
+```{r createesets, cache=TRUE, warning=FALSE}
+#dir.create(outdir, recursive=TRUE)
+source(file.path(datadir,"patientselection.config.txt"))
+
+kConfigFile <- file.path(datadir,"patientselection.config.txt")
+kOutputFile <- file.path(outdir,"data",  "patientselection-esets.RData")
+kLogFile <- file.path(outdir,"data", "createEsetList.log")
+
+#source(system.file("extdata","patientselection.config",package="curatedOvarianData"))
+# sapply(ls(), function(x) if(!x %in% c("remove.samples", "duplicates")) print(get(x)))
+# source(system.file("extdata", "createEsetList.R", package = "curatedOvarianData"))
+ 
+  
+system(paste("Rscript", file.path(srcdir,"createEsetList.R"), kConfigFile, kOutputFile,kLogFile))
+
+```
+
+Invisibly convert dataset names to more human readable ones here
+
+```{r datasetnames, echo=FALSE, cache=TRUE}
+##Make nice dataset names
+simpleDatasetNames <- function(dataset.names, map=NULL, return.map=FALSE){
+    if(is.null(map)){
+        ##Get first author names for datasets:
+        map <- sapply(dataset.names, function(dataset.id){
+            data(list=dataset.id, package="curatedOvarianData")
+            experimentData( get(dataset.id) )@lab
+        })
+        map[map == "Cancer Genome Atlas Research Network 2011" ] <- "TCGA"
+        map <- sapply(strsplit(map, ","), function(x) x[1])
+        map["GSE17260_eset"] <- "Yoshihara 2010"
+        map["GSE32062.GPL6480_eset"] <- "Yoshihara 2012A"
+    }
+    if(return.map){
+        return( map )
+    }else{
+        return( map[ na.omit(match(dataset.names, names(map))) ] )
+    }
+}
+#names(esets) <- simpleDatasetNames(names(esets))
+```
+
+Define the forestplot function:
+
+```{r}
+forestplot <- function(esets, y="y", probeset, formula=y~probeset,
+mlab="Overall", rma.method="FE", at=NULL,xlab="Hazard Ratio",...) {
+    require(metafor)
+    esets <- esets[sapply(esets, function(x) probeset %in% featureNames(x))]
+
+    coefs <- sapply(1:length(esets), function(i) {
+        tmp   <- as(phenoData(esets[[i]]), "data.frame")
+        tmp$y <- esets[[i]][[y]]
+        tmp$probeset <- exprs(esets[[i]])[probeset,]
+         print(tmp)
+       print( summary(coxph(formula,data=tmp))$coefficients[1,c(1,3)])
+      # print(tmp)
+    })  
+
+    print(coefs[1:2,])
+    res.rma <- metafor::rma(yi = coefs[1,], sei = coefs[2,], 
+        method=rma.method)
+
+    if (is.null(at)) at <- log(c(0.25,1,4,20))
+    forest.rma(res.rma, xlab=xlab, slab=gsub("_eset$","",names(esets)),
+    atransf=exp, at=at, mlab=mlab,...)
+    return(res.rma)
+}
+```
+
+Create a simple average stromal content score for each patient.  After scaling each gene to z score, this is the simple mean expression of stromal genes minus the mean expression of tumor genes. 
+
+
+# Repeat for barcode sign
+
+
+```{r smallesets, cache=TRUE}
+##Create random assignments of stromal and tumor genes:
+set.seed(10)
+x= list()
+x$all <- read.csv(file.path(datadir,"fRMA_ROC_ALL.csv"))
+x$Stromal.gene.symbols =x$all[x$all$GS=="SGActivated","symbol"]
+
+x$Tumor.gene.symbols= x$all[x$all$GS=="TG","symbol"]
+
+x$Norm.gene.symbols= x$all[x$all$GS=="SNormal","symbol"]
+x$Norm.gene.symbols= x$Norm.gene.symbols[!is.na(x$Norm.gene.symbols)]
+
+x$Tumor.gene.symbols= x$Tumor.gene.symbols[!is.na(x$Tumor.gene.symbols)]
+
+x$Stromal.gene.symbols= x$Stromal.gene.symbols[!is.na(x$Stromal.gene.symbols)]
+
+tmp <- as.character(c(x$Norm.gene.symbols, x$Stromal.gene.symbols, x$Norm.gene.symbols))
+
+esets.small <- esets
+
+for (i in seq_along(esets)){
+  expr.stromal <- exprs(esets[[i]][featureNames(esets[[i]]) %in% x$Stromal.gene.symbols, ])
+  expr.tumor <- exprs(esets[[i]][featureNames(esets[[i]]) %in% x$Tumor.gene.symbols, ])
+ expr.norm<- exprs(esets[[i]][featureNames(esets[[i]]) %in% x$Norm.gene.symbols, ])
+expr.random<- exprs(esets[[i]][sample(featureNames(esets[[i]]) ,20), ])
+
+  esets.small[[i]] <- esets[[i]][1:4, ] 
+  featureNames(esets.small[[i]]) <- c("tumor", "stromal", "normal", "random")
+  
+  exprs(esets.small[[i]])[1, ] <- scale(colSums(expr.tumor, na.rm=TRUE))
+  
+  exprs(esets.small[[i]])[2, ] <- scale(colSums(expr.stromal, na.rm=TRUE))
+  
+  exprs(esets.small[[i]])[3, ] <- scale(colSums(expr.norm, na.rm=TRUE))
+  
+   exprs(esets.small[[i]])[4, ] <- scale(colSums(expr.random, na.rm=TRUE))
+  
+}
+```
+
+
+
+Forest plots of Cox coefficient for stromal score
+--------------------
+Stromal score is defined as the sum of expressions of each stromal gene, minus the sum of expressions of each tumor gene.  This sum is then scaled to Z score to provide a consistent scale on the forest plots.
+
+With each gene scaled to Z score
+====================
+
+```{r}
+
+for (i in featureNames(esets.small[[1]])){
+res <- forestplot(esets=esets.small, probeset=i, at=log(c(0.5,1,2,4)))
+title(main=i)
+}
+```
+
+No per-gene scaling is done.
+====================
+
+Very consistent with above.
+
+```{r}
+res <- forestplot(esets=esets.small, probeset="stromal.unscaled", at=log(c(0.5,1,2,4)))
+title(main="Unscaled")
+```
+
+Genes are randomly assigned as stromal or tumor.  Per-gene scaling is done.
+====================
+
+Half of tumor / stroma genes are assigned as tumor, the other half as stroma.  Likely there is substantial correlation between these genes, and I think that the confidence interval is likely anti-conservative: ie, there can be a lot of fluctuation of this interval for different random seeds.  Probably the most cautious analysis would be to simulate thousands of random assignments of tumor / stromal genes, calculated the synthesized HR each time, and use this as a null distribution to obtain a p-value for the prognostic value of the true tumor / stromal assignments.
+
+```{r}
+res <- forestplot(esets=esets.small, probeset="stromal.random", at=log(c(0.5,1,2,4)))
+title(main="Random")
+```
+
+
+Dataset properties
+---------------------
+
+```{r, echo=FALSE}
+source(system.file("extdata", "summarizeEsets.R", package =
+    "curatedOvarianData"))
+summary.table <- t(sapply(esets.small, getEsetData))
+rownames(summary.table) <- sub("_eset", "", rownames(summary.table))
+write.table(summary.table, file=file.path(outdir, "summary_table.csv"), row.names=FALSE, quote=TRUE, sep=",")
+```
+
+Table 1: Datasets used in the figure. Stage column provides early/late/unknown, histology column provides ser/clearcell/endo/mucinous/other/unknown
+
+```{r, echo=FALSE, results="asis"}
+knitr:::kable(summary.table[, c(2, 3, 4, 5, 7)])
+```
+
+
+
+# References
+
