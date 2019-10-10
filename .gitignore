@@ -1,3 +1,5 @@
 createEsetList.log 
 data/Input/*
 output/*
+cache/*
+fig/*

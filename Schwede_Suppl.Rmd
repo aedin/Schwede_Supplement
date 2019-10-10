@@ -40,7 +40,9 @@ ReqPkg<-c("made4", "affy", "caret", "limma", "frma", "ROC","pROC", "nortest", "d
 
 ReqPkg2<- "CellMix"  # Install no longer working
 
-BiocManager::install(ReqPkg[!ReqPkg%in%pkg])
+if (length(ReqPkg[!ReqPkg%in%pkg])>0){
+  BiocManager::install(ReqPkg[!ReqPkg%in%pkg])
+}
 
 library(made4)
 library(affy)
@@ -53,7 +55,7 @@ library(nortest)
 library(dendextend)
 library(readxl)
 library(sva)
-
+library(dplyr)
 # Annotation Packages
 library(biomaRt)
 library(annotate)
@@ -149,8 +151,8 @@ This signature contained 461 and 227 unique gene symbols with increased expressi
 ```{r heatplot_SchwedeSig_BirrerData2, message=FALSE, warning=FALSE}
 geneSig<-supplTabs[[1]]
 names(geneSig) = sub("symbols", "GeneSymbols", sub("Affy_ID\\'s", "AffyIDs", gsub("_gene", "", gsub(" ", "_", names(geneSig) ))))
-sapply(geneSig[1:2], n_distinct, na.rm=TRUE)
-sapply(geneSig[3:4], n_distinct, na.rm=TRUE)
+sapply(geneSig[1:2], dplyr::n_distinct, na.rm=TRUE)
+sapply(geneSig[3:4], dplyr::n_distinct, na.rm=TRUE)
 geneSig<-as.list(geneSig)
 geneSig<-lapply(geneSig, function(x) x[!is.na(x)])
 ```
@@ -321,82 +323,101 @@ These 512 unique gene symbols that contained 431 and 81 genes that had higher ex
 
 
 ```{r birrerSTsig, warnings=FALSE, message=FALSE, echo=TRUE}
- library(limma)
- ST<-birrer_eSet[,!birrer_eSet$sample_type =="Normal"]
- Pair<-factor(factor(ST$alt_sample_name))
- Cell<-factor(ST$sample_type)
+load(file=file.path(datadir,"birrer_eSet_complete.RData"))
+ 
+library(limma)
+ ST<-birrer_eSet[,!birrer_eSet$sample_type =="Normal"]  # Subset to just Tumor, Stroma
+ Pair<-factor(as.character(ST$alt_sample_name))
+ Cell<-factor(as.character(ST$sample_type))
  design<-model.matrix(~Pair+Cell)
  fit_pair<-lmFit(ST,design)
  fit_pair <- eBayes(fit_pair)
-res<- topTable(fit_pair, coef="CellStroma", p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST))
+res<- topTable(fit_pair, coef="CellTumor", p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST))
+summary(decideTests(fit_pair, adjust.method = "bonferroni", p.value = 0.0001))[,"CellTumor"]
 
-# exclude any genes that parition by stroma batch or tumor batch
-birrer_eSet$batch_yrsMonth= substr(birrer_eSet$batch,1,7)
-birrer_eSet$batch_yrs= substr(birrer_eSet$batch,1,4)
+BirrerStromaSig<-res[res$adj.P.Val<0.0000000001&res$logFC<0,1]
+BirrerTumorSig<-res[res$adj.P.Val<0.0000000001&res$logFC>0,1]
+length(BirrerStromaSig)
+length(BirrerTumorSig)
+write.csv(res[BirrerTumorSig,], file=file.path(outdir,"BirrerStromaSig.csv"))
+write.csv(res[BirrerStromaSig,], file=file.path(outdir,"BirrerTumorSig.csv"))
+```
 
+## Map Affymetrix IDs to Gene Symbols
+The numbers of Affmetrix IDs, and their gene symbols are below.  
+
+```{r}
+library(annotate)
+library("hgu133plus2.db")
+BirrerSig<-list(BirrerStromaSig,BirrerTumorSig)
+BirrerSig<-c(BirrerSig,lapply(BirrerSig, function(sig){ symsig<-unique(as.character(getSYMBOL(sig,"hgu133plus2.db")))
+   symsig<-symsig[!is.na(symsig)]}))
+
+names(BirrerSig) =names(geneSig)
+sapply(BirrerSig,dplyr::n_distinct, na.rm=TRUE)
+
+```
+
+# Adjusting for batch effects. Identify Genes that are associated with Batch
+Exclude any genes that parition by stroma batch or tumor batch
+```{r}
+load(file=file.path(datadir,"birrer_eSet_complete.RData"))
+# Select Tumor Samples
 ST<-birrer_eSet[,birrer_eSet$sample_type =="Tumor"]
+ST$batch_yrsMonth= substr(ST$batch,1,7)
+ST$batch_yrs= substr(ST$batch,1,4)
 design<-model.matrix(~vital_status+batch_yrsMonth, data=ST)
 fit<-lmFit(ST,design)
 fit <- eBayes(fit)
-b<-grep("batch",colnames(coef(fit)))
+#summary(decideTests(fit, adjust.method = "BH", p.value = 0.0001))
+b<-grep("batch",colnames(coef(fit)))  # Batch Coefficients
 batchT<-lapply(b, function(x) topTable(fit, coef=x, p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST)))
 batchT<- unlist(lapply(batchT, function(x) x$ID))
 
-ST<-birrer_eSet[,!birrer_eSet$sample_type =="Tumor"]
+# Select Stroma Samples
+ST<-birrer_eSet[,birrer_eSet$sample_type =="Stroma"]
 design<-model.matrix(~batch_yrsMonth, data=ST)
 fit<-lmFit(ST,design)
 fit <- eBayes(fit)
+#summary(decideTests(fit, adjust.method = "BH", p.value = 0.0001))
 b<-grep("batch",colnames(coef(fit)))
 batchS<-lapply(b, function(x) topTable(fit, coef=x, p.value=0.0001, sort.by="p",adjust.method="bonferroni", number=nrow(ST),genelist=featureNames(ST)))
 batchS<- unlist(lapply(batchS, function(x) x$ID))
 
 ```
 
-Genes that overlapped with the those significantly different between batches were excluded.
-
-The numbers of Affmetrix IDs, and their gene symbols are below.  
-
 ```{r birrerSTsig2, warnings=FALSE, message=FALSE}
-
-BirrerStromaSig<-res[res$adj.P.Val<0.0000000001&res$logFC>0,1]
-BirrerTumorSig<-res[res$adj.P.Val<0.0000000001&res$logFC<0,1]
-
 # Exclude probes associated with batch
 # There was only 1 probe in the Tumor Genes also associated with batch
 # There was 55 probes in the Stroma Genes also associated with batch
 # There were removed
-BirrerTumorSig<- BirrerTumorSig[!BirrerTumorSig %in% c(batchS, batchT)]
-BirrerStromaSig<- BirrerStromaSig[!BirrerStromaSig%in% c(batchS, batchT)]
-
-
-write.csv(res[BirrerTumorSig,], file=file.path(outdir,"BirrerStromaSig.csv"))
-write.csv(res[BirrerStromaSig,], file=file.path(outdir,"BirrerTumorSig.csv"))
-
-
-## Map Affymetrix IDs to Gene Symbols
-library(annotate)
-library("hgu133plus2.db")
-
-BirrerTumorSigHGNC<-unique(as.character(getSYMBOL(BirrerTumorSig, "hgu133plus2.db")))
-BirrerStromaSigHGNC<-unique(as.character(getSYMBOL(BirrerStromaSig, "hgu133plus2.db")))
-
-## Remove NA
-BirrerTumorSigHGNC<-BirrerTumorSigHGNC[!is.na(BirrerTumorSigHGNC)]
-BirrerStromaSigHGNC<-BirrerStromaSigHGNC[!is.na(BirrerStromaSigHGNC)]
-
-BirrerSig<-list(BirrerStromaSig,BirrerTumorSig,BirrerStromaSigHGNC,BirrerTumorSigHGNC)
-names(BirrerSig) =names(geneSig)
-sapply(BirrerSig[1:2],function(x)length(unique(x)))
-sapply(BirrerSig[3:4],function(x)length(unique(x)))
-
-####$$$$$$$$############
-# Actually Suppl Table
-x<-supplTabs[[3]]
-sapply(x[1:2], n_distinct, na.rm=TRUE)
-sapply(x[3:4], n_distinct, na.rm=TRUE)
-#geneSig<-as.list(geneSig)
-#geneSig<-lapply(geneSig, function(x) x[!is.na(x)])
+#BirrerTumorSig<- BirrerTumorSig[!BirrerTumorSig %in% c(batchS, batchT)]
+#BirrerStromaSig<- BirrerStromaSig[!BirrerStromaSig%in% c(batchS, batchT)]
+#Genes that overlapped with the those significantly different between batches were excluded.
+venn(list(Tumor=BirrerSig$Tumor_AffyIDs, Stroma=BirrerSig$Stromal_AffyIDs, batch=c(batchS, batchT)))
 ```
+
+# Actually Suppl Table
+Reading Birrer Sig from Supplemementary Table  
+```{r}
+BirrerSig.new=BirrerSig
+#BirrerSig is computed 
+
+BirrerSig<-supplTabs[[3]]
+BirrerSig<-as.list(BirrerSig)
+BirrerSig<-lapply(BirrerSig, function(x) x[!is.na(x)])
+
+# Check if any change with annotation update,
+# Affy IDs are equal
+sapply(BirrerSig[1:2], dplyr::n_distinct, na.rm=TRUE)
+all(unlist(BirrerSig$Stromal_AffyIDs) == BirrerSig.new$Stromal_AffyIDs)
+all(unlist(BirrerSig$Tumor_AffyIDs) == BirrerSig.new$Tumor_AffyIDs)
+
+sapply(BirrerSig[1:4], dplyr::n_distinct, na.rm=TRUE)
+
+```
+
+
 
 The signature distinguishes tumor and stroma in the MGH dataset. 
  
@@ -488,7 +509,7 @@ The number of genes that discriminated between each pair of subtypes varied in s
 ```{r AOCSgenes}
 #table(tothill$Subtype)
 
-MSgenes<-read.csv(file.path(datadir,"AOCS subtype specific genes.csv"), as.is=TRUE, row.names=1, na.strings = "AAAAAAAAAA")
+MSgenes<-read.csv(file.path(inputdir,"AOCS subtype specific genes.csv"), as.is=TRUE, row.names=1, na.strings = "AAAAAAAAAA")
 
 x<-apply(MSgenes, 2, function(x) sum(!is.na(unique(x))))
 x<-cbind(Affymetrix_ID=x[grep("Affy", names(x))], Gene_Symbol=x[grep("Gene", names(x))])
@@ -514,9 +535,26 @@ title(main="C4 v other tumors")
 # create list of genelists (symbols) and compare overlap
 
 ```{r}
-# read 0.05 genelists suppl table
-gg<-readxl::read_xlsx("../../CCR_SupplementaryTables 2.xlsx", sheet = 2, skip=4)
-gg2<-readxl::read_xlsx("../../CCR_SupplementaryTables 2.xlsx", sheet = 3, skip=4)
+# read MGH, AOCS 0.05, 0.001 genelists suppl table
+# Table 2
+# MSgenes is the molecular subtype genes from the AOCS Tothill suppl 
+gg<-readxl::read_xlsx(file.path(outdir,"CCR_SupplementaryTables 2.xlsx"), sheet = 2, skip=4)
+
+
+ll <-list(AOCS_Stroma=gg$`Stromal gene symbols...3`,
+          AOCS_Tumor=gg$`Tumor gene symbols...4`,
+          AOCS_Stroma001=gg$`Stromal gene symbols...7`,
+         AOCS_Tumor001=  gg$`Tumor gene symbols...8`,
+          MGH_Stroma=gg$`Stroma Gene Symbols`, 
+         MGH_Tumor= gg$`Tumor Gene Symbols`,
+         AOCS_C1=AOCS_sig[AOCS_sig$Subtype=="C1","SYMBOL"],
+         C1vC2=MSgenes[,2], C1vC4=MSgenes[,4], C1vC5=MSgenes[,6], C2vC4=MSgenes[,8],C2vC5=MSgenes[,10],C4vC5=MSgenes[,12])
+
+ll<-lapply(ll, function(x) unique(x[!is.na(x)]))
+sapply(ll, dplyr::n_distinct)
+#AOCS molecular subtypes comparisons
+# Table 3
+gg2<-readxl::read_xlsx(file.path(outdir,"CCR_SupplementaryTables 2.xlsx"), sheet = 3, skip=4)
 gg2<-as.list(gg2[,seq(2,ncol(gg2),2)])
 names(gg2)<-gsub(" ", "", names(gg2))
 names(gg2)<- sub("-Gene", "", names(gg2))
@@ -526,10 +564,7 @@ names(gg2)<- sub("Differentiated", "Diff", names(gg2))
 names(gg2)<- sub("Proliferative", "Prof", names(gg2))
 names(gg2)<- sub("s.", "", names(gg2))
 
-ll <-list(AOCS_Stroma=geneSig$Stromal_GeneSymbols,AOCS_Tumor=geneSig$Tumor_GeneSymbols,
-          AOCS_Stroma001= unique(gg$`Stromal gene symbols...7`[!is.na(gg$`Stromal gene symbols...7`)]),
-         AOCS_Tumor001=  unique(gg$`Tumor gene symbols...8`[!is.na(gg$`Tumor gene symbols...8`)]),
-          MGH_Stroma=BirrerSig$Stromal_GeneSymbols, MGH_Tumor= BirrerSig$Tumor_GeneSymbols, AOCS_C1=AOCS_sig[AOCS_sig$Subtype=="C1","SYMBOL"],C1vC2=MSgenes[,2], C1vC4=MSgenes[,4], C1vC5=MSgenes[,6], C2vC4=MSgenes[,8],C2vC5=MSgenes[,10],C4vC5=MSgenes[,12])
+
 
 ll<-c(ll,gg2)
 ll<-lapply(ll, unique)
