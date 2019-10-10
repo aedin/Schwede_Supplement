@@ -614,7 +614,7 @@ res[,1]<-p.adjust(res[,1], "fdr")
 
 res[grep("^AOCS_Stroma001", rownames(res)),]
 res[grep("^MGH", rownames(res)),]
-write.csv(res, file="./results_fisher_overlapGenelists.csv")
+write.csv(res, file=file.path(outdir, "./results_fisher_overlapGenelists.csv"))
 ```
 
 
